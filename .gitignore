@@ -1,0 +1,6 @@
+# secrets stay local
+.cloudflare.env
+*.env
+# render scratch
+tools/html/
+__pycache__/

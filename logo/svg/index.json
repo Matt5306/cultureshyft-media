@@ -1,0 +1,114 @@
+{
+ "cultureshyft-horizontal-color-onlight": {
+  "w": 3153,
+  "h": 665,
+  "lockup": "horizontal",
+  "colorway": "color-onlight",
+  "dark_bg": false
+ },
+ "cultureshyft-horizontal-color-ondark": {
+  "w": 3153,
+  "h": 665,
+  "lockup": "horizontal",
+  "colorway": "color-ondark",
+  "dark_bg": true
+ },
+ "cultureshyft-horizontal-mono-black": {
+  "w": 3153,
+  "h": 665,
+  "lockup": "horizontal",
+  "colorway": "mono-black",
+  "dark_bg": false
+ },
+ "cultureshyft-horizontal-mono-white": {
+  "w": 3153,
+  "h": 665,
+  "lockup": "horizontal",
+  "colorway": "mono-white",
+  "dark_bg": true
+ },
+ "cultureshyft-stacked-color-onlight": {
+  "w": 2292,
+  "h": 1452,
+  "lockup": "stacked",
+  "colorway": "color-onlight",
+  "dark_bg": false
+ },
+ "cultureshyft-stacked-color-ondark": {
+  "w": 2292,
+  "h": 1452,
+  "lockup": "stacked",
+  "colorway": "color-ondark",
+  "dark_bg": true
+ },
+ "cultureshyft-stacked-mono-black": {
+  "w": 2292,
+  "h": 1452,
+  "lockup": "stacked",
+  "colorway": "mono-black",
+  "dark_bg": false
+ },
+ "cultureshyft-stacked-mono-white": {
+  "w": 2292,
+  "h": 1452,
+  "lockup": "stacked",
+  "colorway": "mono-white",
+  "dark_bg": true
+ },
+ "cultureshyft-mark-color-onlight": {
+  "w": 1200,
+  "h": 1200,
+  "lockup": "mark",
+  "colorway": "color-onlight",
+  "dark_bg": false
+ },
+ "cultureshyft-mark-color-ondark": {
+  "w": 1200,
+  "h": 1200,
+  "lockup": "mark",
+  "colorway": "color-ondark",
+  "dark_bg": true
+ },
+ "cultureshyft-mark-mono-black": {
+  "w": 1200,
+  "h": 1200,
+  "lockup": "mark",
+  "colorway": "mono-black",
+  "dark_bg": false
+ },
+ "cultureshyft-mark-mono-white": {
+  "w": 1200,
+  "h": 1200,
+  "lockup": "mark",
+  "colorway": "mono-white",
+  "dark_bg": true
+ },
+ "cultureshyft-wordmark-color-onlight": {
+  "w": 2528,
+  "h": 544,
+  "lockup": "wordmark",
+  "colorway": "color-onlight",
+  "dark_bg": false
+ },
+ "cultureshyft-wordmark-color-ondark": {
+  "w": 2528,
+  "h": 544,
+  "lockup": "wordmark",
+  "colorway": "color-ondark",
+  "dark_bg": true
+ },
+ "cultureshyft-wordmark-mono-black": {
+  "w": 2528,
+  "h": 544,
+  "lockup": "wordmark",
+  "colorway": "mono-black",
+  "dark_bg": false
+ },
+ "cultureshyft-wordmark-mono-white": {
+  "w": 2528,
+  "h": 544,
+  "lockup": "wordmark",
+  "colorway": "mono-white",
+  "dark_bg": true
+ }
+}
