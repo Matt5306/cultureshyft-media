@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Flyer Factory · CultureShyft Media</title>
+  <link rel="icon" href="../logo/icons/favicon.ico">
+  <link rel="stylesheet" href="factory.css">
+  <script src="factory.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <a href="../index.html" aria-label="CultureShyft Media home"><img src="../logo/web/cultureshyft-horizontal-color-onlight.png" alt="CultureShyft Media" width="200"></a>
+    <span class="edition">THE FLYER FACTORY / LETTER</span>
+  </header>
+  <main class="workspace">
+    <section class="editor" aria-labelledby="page-title">
+      <p class="eyebrow">01 / MAKE IT YOURS</p>
+      <h1 id="page-title">A brief in.<br>A flyer out.</h1>
+      <p class="intro">Add the details. Watch your flyer take shape.</p>
+      <form id="brief" autocomplete="off">
+        <label for="layout">Layout</label>
+        <select id="layout" name="layout">
+          <option value="poster">Poster — photo &amp; bold headline</option>
+          <option value="event">Event — date &amp; details</option>
+          <option value="announcement">Announcement — just the message</option>
+        </select>
+        <label for="headline">Headline <span>required</span></label>
+        <input id="headline" name="headline" maxlength="140" required placeholder="What's happening?">
+        <label for="subheadline">Subheadline</label>
+        <input id="subheadline" name="subheadline" maxlength="180" placeholder="One sentence that makes it matter">
+        <label for="date">Date &amp; time</label>
+        <input id="date" name="date" maxlength="100" placeholder="Saturday, October 24 · 2–6 PM">
+        <label for="place">Place</label>
+        <input id="place" name="place" maxlength="140" placeholder="Venue name and address">
+        <label for="body">Body <span>3 lines max on the flyer</span></label>
+        <textarea id="body" name="body" rows="3" maxlength="450" placeholder="The three things people need to know." aria-describedby="body-help"></textarea>
+        <p class="field-help" id="body-help">Keep it short. Extra text is shortened in the preview; your full text stays here.</p>
+        <label for="cta">Call to action</label>
+        <input id="cta" name="cta" maxlength="100" placeholder="Reserve your spot today">
+        <label for="contact">Contact line <span>required</span></label>
+        <input id="contact" name="contact" maxlength="160" required placeholder="Website, email or phone number">
+        <label class="check-label" for="accent"><input type="checkbox" id="accent" name="accent" checked> Use Shyft Orange</label>
+        <label for="photo">Photo upload <span>optional</span></label>
+        <input type="file" id="photo" accept="image/jpeg,image/png,image/webp" aria-describedby="photo-help photo-status">
+        <p class="field-help" id="photo-help">JPG, PNG or WebP, up to 12 MB. Photos are cropped to fill. Announcement is type-only.</p>
+        <div class="photo-actions"><button type="button" class="quiet-button" id="remove-photo" disabled>Remove photo</button><span id="photo-status" role="status">Your photo stays on this device.</span></div>
+      </form>
+      <p class="session-note">Keep this tab open while you work. Save a PDF before closing; this page does not save your brief.</p>
+    </section>
+    <section class="preview-panel" aria-labelledby="preview-title">
+      <div class="preview-heading"><div><p class="eyebrow">02 / CHECK YOUR FLYER</p><h2 id="preview-title">Ready for the real world.</h2></div><span class="paper-size">8.5 × 11 IN</span></div>
+      <div class="preview-well" id="preview-well">
+        <div class="preview-scale" id="preview-scale">
+          <article class="flyer" id="flyer" data-layout="poster" aria-label="Live flyer preview">
+            <div class="photo-area" id="photo-area" aria-hidden="true"><img id="flyer-photo" alt="" hidden><div class="photo-art"><span></span><span></span><span></span></div></div>
+            <div class="headline-panel"><h2 id="flyer-headline" data-fit="headline"></h2><p id="flyer-subheadline" data-fit="subheadline"></p></div>
+            <div class="date-panel"><p class="flyer-label">WHEN</p><p id="flyer-date" data-fit="date"></p></div>
+            <div class="place-panel"><p class="flyer-label">WHERE</p><p id="flyer-place" data-fit="place"></p></div>
+            <div class="body-panel"><p id="flyer-body" data-fit="body"></p></div>
+            <div class="cta-panel"><p id="flyer-cta" data-fit="cta"></p></div>
+            <footer class="flyer-footer"><p id="flyer-contact" data-fit="contact"></p><div class="logo-space"><img id="flyer-logo" src="../logo/web/cultureshyft-horizontal-color-onlight.png" alt="CultureShyft Media"></div></footer>
+          </article>
+        </div>
+      </div>
+      <div class="export-panel">
+        <p class="eyebrow">03 / TAKE IT WITH YOU</p>
+        <p id="next-step" role="status">Start with a headline and contact line.</p>
+        <button type="button" id="print-button">Save as PDF <span aria-hidden="true">↗</span></button>
+        <p class="print-help">Choose Save as PDF, Letter, no margins, background graphics on.</p>
+      </div>
+    </section>
+  </main>
+  <noscript>This flyer needs JavaScript. Enable it in your browser, then reload this page. Your files are not changed.</noscript>
+</body>
+</html>
