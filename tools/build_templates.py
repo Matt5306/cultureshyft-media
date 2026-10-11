@@ -10,7 +10,8 @@ for d in ("print", "social", "web"): os.makedirs(os.path.join(R, "templates", d)
 ACC, INK, PAPER, SAND, SLATE, EMBER = "#FF5A1F", "#14151A", "#FFFFFF", "#F4F3EF", "#6A6E78", "#FFE8DC"
 NAME, TITLE, EMAIL, PHONE, SITE, HANDLE = "Mark Andrew", "Cultural Media Artifact Engineer", "mark@cultureshyftmedia.com", "248-505-0050", "cultureshyftmedia.com", "@cultureshyftmedia"
 LOGO = lambda n: f"file:///{R}/logo/web/{n}.png".replace("\\", "/")
-FONT = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap">'
+QR = f"file:///{R}/assets/qr-site.png".replace("\\", "/")
+FONT = f'<style>@font-face{{font-family:Manrope;src:url("file:///{R}/fonts/Manrope-Variable.ttf");font-weight:200 800}}</style>'.replace("\\", "/")
 BASE = f"body{{margin:0;font-family:Manrope,'Segoe UI',system-ui,sans-serif;color:{INK};-webkit-print-color-adjust:exact;print-color-adjust:exact}} *{{box-sizing:border-box}}"
 
 def render(name, body, css, kind, w_in=None, h_in=None, px=None):
@@ -33,15 +34,16 @@ def render(name, body, css, kind, w_in=None, h_in=None, px=None):
 card_css = f".card{{width:3.75in;height:2.25in;position:relative;overflow:hidden}} .trim{{position:absolute;inset:0.125in;}}"
 render("business-card-front", f'''<div class="card" style="background:{INK}"><div class="trim" style="display:flex;align-items:center;justify-content:center;padding:0.2in">
   <img src="{LOGO('cultureshyft-horizontal-color-ondark')}" style="width:2.6in"></div></div>''', card_css, "print", 3.75, 2.25)
-render("business-card-back", f'''<div class="card" style="background:{PAPER}"><div class="trim" style="padding:0.22in 0.28in;display:flex;gap:0.22in;align-items:center">
-  <img src="{LOGO('cultureshyft-mark-color-onlight')}" style="width:0.75in;height:0.75in">
-  <div style="display:flex;flex-direction:column;gap:2pt">
-    <div style="font-size:14pt;font-weight:800;letter-spacing:-0.2pt">{NAME}</div>
-    <div style="font-size:7.5pt;font-weight:700;letter-spacing:1pt;color:{ACC};text-transform:uppercase">{TITLE}</div>
-    <div style="height:2pt;width:0.4in;background:{ACC};margin:4pt 0"></div>
-    <div style="font-size:8pt;font-weight:500;color:#3a3d44">{PHONE}</div>
-    <div style="font-size:8pt;font-weight:500;color:#3a3d44">{EMAIL}</div>
-    <div style="font-size:8pt;font-weight:700">{SITE} · {HANDLE}</div>
+render("business-card-back", f'''<div class="card" style="background:{PAPER}"><div class="trim" style="padding:0.18in 0.26in;display:flex;flex-direction:column;justify-content:space-between">
+  <img src="{LOGO('cultureshyft-horizontal-color-onlight')}" style="width:2.35in">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:0.15in">
+    <div style="display:flex;flex-direction:column;gap:1.5pt">
+      <div style="font-size:12.5pt;font-weight:800;letter-spacing:-0.2pt">{NAME}</div>
+      <div style="font-size:6.8pt;font-weight:700;letter-spacing:0.9pt;color:{ACC};text-transform:uppercase">{TITLE}</div>
+      <div style="font-size:7.6pt;font-weight:500;color:#3a3d44;margin-top:3pt">{PHONE} · {EMAIL}</div>
+      <div style="font-size:7.6pt;font-weight:700">{SITE} · {HANDLE}</div>
+    </div>
+    <img src="{QR}" style="width:0.62in;height:0.62in">
   </div></div></div>''', card_css, "print", 3.75, 2.25)
 
 # ---------- letterhead / invoice header, US letter ----------
@@ -79,12 +81,12 @@ render("slide-title", f'''<div style="width:1920px;height:1080px;background:{INK
 # ---------- social kit ----------
 render("social-instagram-post", f'''<div style="width:1080px;height:1080px;background:{ACC};padding:80px;display:flex;flex-direction:column;justify-content:space-between;color:{PAPER}">
   <div style="font-size:24px;font-weight:700;letter-spacing:4px">{HANDLE.upper()}</div>
-  <div style="font-size:104px;font-weight:800;line-height:1;letter-spacing:-2px">Shyft<br>the room.</div>
+  <div style="font-size:92px;font-weight:800;line-height:1;letter-spacing:-2px">Media<br>made to<br>move people.</div>
   <div style="background:{INK};border-radius:20px;padding:28px 36px;display:flex;align-items:center;justify-content:space-between"><img src="{LOGO('cultureshyft-horizontal-color-ondark')}" style="width:420px"><span style="font-size:22px;font-weight:700">{SITE}</span></div>
 </div>''', "", "png", px=(1080, 1080))
 render("social-instagram-story", f'''<div style="width:1080px;height:1920px;background:{INK};padding:120px 90px;display:flex;flex-direction:column;justify-content:space-between;color:{PAPER}">
   <img src="{LOGO('cultureshyft-stacked-color-ondark')}" style="width:420px;align-self:center">
-  <div style="font-size:120px;font-weight:800;line-height:1;letter-spacing:-3px">Made to<br>move<br><span style="color:{ACC}">people.</span></div>
+  <div style="font-size:120px;font-weight:800;line-height:1;letter-spacing:-3px">Media<br>made to<br>move<br><span style="color:{ACC}">people.</span></div>
   <div style="font-size:30px;font-weight:700;letter-spacing:5px;color:{ACC}">{HANDLE.upper()}</div>
 </div>''', "", "png", px=(1080, 1920))
 for name, w, h, safe in (("social-facebook-cover", 1640, 624, 0), ("social-linkedin-banner", 1584, 396, 0), ("social-x-header", 1500, 500, 0), ("social-youtube-banner", 2560, 1440, 1)):

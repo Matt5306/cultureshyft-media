@@ -10,7 +10,7 @@ You are designing for **CultureShyft Media** (one word, capital C and S, spelled
 
 **Layout habits:** left-aligned, generous white space, one orange element per layout, headlines big and short, a dark Ink band is the usual home for the logo. Photos are fine; the logo sits on a plain block, never directly on a busy image.
 
-**Voice:** bold, warm, quick, clear. Short sentences. Lead with what the reader gets. No exclamation marks in body copy. Tagline options: "Shyft the room." / "Made to move people." / "Your event. Our flyer. Their phones."
+**Voice:** bold, warm, quick, clear. Short sentences. Lead with what the reader gets. No exclamation marks in body copy. Tagline (use exactly): "Media made to move people."
 
 **Contact block (use exactly):** Mark Andrew · Cultural Media Artifact Engineer · CultureShyft Media · cultureshyftmedia.com · @cultureshyftmedia · mark@cultureshyftmedia.com · 248-505-0050
 

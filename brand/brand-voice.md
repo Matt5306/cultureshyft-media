@@ -10,16 +10,13 @@ Pick one; the first is the one on the business card draft.
 3. Cultural Media Architect
 
 ## One line (bio, email signature)
-CultureShyft Media makes the flyers, posts and campaigns that move a crowd.
+(The first draft was rejected by Mark. Three options to pick from are in `bios.md`.)
 
 ## Elevator pitch (30 seconds)
 Most flyers get glanced at and forgotten. I make the ones people screenshot. CultureShyft Media designs digital marketing materials, flyers, social graphics, campaign sets, that look like they belong to a brand people already trust. You tell me the event or the offer; you get print-ready and phone-ready files, fast.
 
-## Tagline options
-- Shyft the room.
-- Made to move people.
-- Your event. Our flyer. Their phones.
-- Culture doesn't wait. Neither do we.
+## Tagline (fixed)
+**Media made to move people.**
 
 ## Tone words
 Bold, warm, quick, clear. Confident without hype. We say "flyer", not "collateral". We say "you", not "clients".
