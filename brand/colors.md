@@ -1,6 +1,6 @@
-# Colours
+# Colors
 
-Two colours do the work. Everything else is support.
+Two colors do the work. Everything else is support.
 
 | Name | Use | HEX | RGB | CMYK (approx.) |
 |---|---|---|---|---|
@@ -22,4 +22,4 @@ Roughly: 60% Paper or Ink (whichever is the background), 30% Ink or Paper (text)
 - Orange on white body text: no.
 
 ## Print notes
-Shyft Orange is a bright colour; on uncoated paper it prints a little duller. If a printer offers Pantone, ask for **Pantone 1655 C** as the closest match. Ink should be printed as rich black (the CMYK above), not 100% K alone, on anything larger than text.
+Shyft Orange is a bright color; on uncoated paper it prints a little duller. If a printer offers Pantone, ask for **Pantone 1655 C** as the closest match. Ink should be printed as rich black (the CMYK above), not 100% K alone, on anything larger than text.

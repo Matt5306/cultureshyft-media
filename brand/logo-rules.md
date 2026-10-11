@@ -3,13 +3,13 @@
 ## The pieces
 - **Mark**: the Y antenna. Use alone for avatars, favicons, app icons, watermarks, and anywhere under about 1 inch wide.
 - **Horizontal lockup**: mark + wordmark side by side. The default for websites, email, documents, the business card.
-- **Stacked lockup**: mark above the wordmark. For square spaces: social posts, stickers, the centre of a flyer.
+- **Stacked lockup**: mark above the wordmark. For square spaces: social posts, stickers, the center of a flyer.
 - **Wordmark**: the name alone. For narrow horizontal bands where the mark would be too small.
 
-## Colourways
+## Colorways
 - `color-onlight` on white, Sand, photos with a light area.
 - `color-ondark` on Ink, dark photos, video.
-- `mono-black` / `mono-white` when only one colour is possible: embroidery, engraving, one-colour screen print, fax-grade reproduction.
+- `mono-black` / `mono-white` when only one color is possible: embroidery, engraving, one-color screen print, fax-grade reproduction.
 
 ## Clear space
 Keep empty space around the logo equal to the height of the Y's stem (the mark's lower bar). Nothing inside that space: no text, no edges, no other logos.
@@ -24,7 +24,7 @@ Light or dark, plain or quiet. On a busy photo, put the logo on an Ink or Paper 
 
 ## Don'ts
 - Don't stretch, squash or rotate it.
-- Don't recolour the arcs or the Y to anything but the brand colours.
+- Don't recolor the arcs or the Y to anything but the brand colors.
 - Don't add shadows, outlines, glows, gradients or bevels.
 - Don't rebuild the wordmark by typing it in Manrope. Use the files; the letterspacing and the orange Y are set.
 - Don't put the mark inside a circle or badge unless it is an avatar (then use `logo/icons/avatar-*.png`).

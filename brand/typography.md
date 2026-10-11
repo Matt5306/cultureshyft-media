@@ -23,5 +23,5 @@ Why Manrope: geometric, friendly, reads well small, and it is the typeface the w
 
 ## Rules
 - Caps + letter-spacing is for short labels only (MEDIA, FLYERS · SOCIAL · CAMPAIGNS). Never set a paragraph in caps.
-- Headlines left-aligned by default. Centred only on posters and social squares.
+- Headlines left-aligned by default. Centered only on posters and social squares.
 - One size jump between levels is enough. If something needs to be louder, make it orange, not bigger.

@@ -4,7 +4,7 @@ You are designing for **CultureShyft Media** (one word, capital C and S, spelled
 
 **Logo:** "The Y": a bold Y whose two arms hold two orange broadcast arcs, like an antenna. The wordmark is CULTURESHYFT in Manrope ExtraBold with the Y in orange and MEDIA in small spaced caps under it. Never redraw the logo; use the files from the brand kit (github.com/Matt5306/cultureshyft-media, folder `logo/`).
 
-**Colours:** Shyft Orange #FF5A1F (accent, used once per layout, never behind small text). Ink #14151A (text, dark backgrounds). Paper #FFFFFF. Sand #F4F3EF (soft background). Slate #6A6E78 (secondary text). Ember tint #FFE8DC (a wash behind orange elements).
+**Colors:** Shyft Orange #FF5A1F (accent, used once per layout, never behind small text). Ink #14151A (text, dark backgrounds). Paper #FFFFFF. Sand #F4F3EF (soft background). Slate #6A6E78 (secondary text). Ember tint #FFE8DC (a wash behind orange elements).
 
 **Type:** Manrope only. ExtraBold 800 for headlines, Bold 700 for labels and buttons, Medium 500 for body. Labels in caps with letter-spacing; never paragraphs in caps.
 
