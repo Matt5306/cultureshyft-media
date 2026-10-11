@@ -12,6 +12,6 @@ You are designing for **CultureShyft Media** (one word, capital C and S, spelled
 
 **Voice:** bold, warm, quick, clear. Short sentences. Lead with what the reader gets. No exclamation marks in body copy. Tagline options: "Shyft the room." / "Made to move people." / "Your event. Our flyer. Their phones."
 
-**Contact block (use exactly):** Mark Andrew · Cultural Media Artifact Engineer · CultureShyft Media · cultureshyftmedia.com · @cultureshyftmedia · [EMAIL] · [PHONE]
+**Contact block (use exactly):** Mark Andrew · Cultural Media Artifact Engineer · CultureShyft Media · cultureshyftmedia.com · @cultureshyftmedia · mark@cultureshyftmedia.com · 248-505-0050
 
 **Don'ts:** no gradients, drop shadows, glows, or outlines on the logo; no other orange; no "Culture Shift" spelling; no emoji in headlines.

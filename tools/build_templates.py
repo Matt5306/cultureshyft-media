@@ -8,7 +8,7 @@ SRC = os.path.join(R, "templates", "src"); os.makedirs(SRC, exist_ok=True)
 for d in ("print", "social", "web"): os.makedirs(os.path.join(R, "templates", d), exist_ok=True)
 
 ACC, INK, PAPER, SAND, SLATE, EMBER = "#FF5A1F", "#14151A", "#FFFFFF", "#F4F3EF", "#6A6E78", "#FFE8DC"
-NAME, TITLE, EMAIL, PHONE, SITE, HANDLE = "Mark Andrew", "Cultural Media Artifact Engineer", "[EMAIL]", "[PHONE]", "cultureshyftmedia.com", "@cultureshyftmedia"
+NAME, TITLE, EMAIL, PHONE, SITE, HANDLE = "Mark Andrew", "Cultural Media Artifact Engineer", "mark@cultureshyftmedia.com", "248-505-0050", "cultureshyftmedia.com", "@cultureshyftmedia"
 LOGO = lambda n: f"file:///{R}/logo/web/{n}.png".replace("\\", "/")
 FONT = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap">'
 BASE = f"body{{margin:0;font-family:Manrope,'Segoe UI',system-ui,sans-serif;color:{INK};-webkit-print-color-adjust:exact;print-color-adjust:exact}} *{{box-sizing:border-box}}"
