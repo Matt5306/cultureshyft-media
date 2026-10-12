@@ -11,6 +11,7 @@ Run from anywhere::
 
     python tools/check_factory.py
     python tools/check_factory.py --keep
+    python tools/check_factory.py --social
 
 ``--keep`` preserves the generated PNG and PDF evidence in
 ``tools/html/factory``.  Otherwise all artifacts live in a temporary directory.
@@ -19,8 +20,11 @@ Run from anywhere::
 from __future__ import annotations
 
 import argparse
+import base64
 import html
+import io
 import json
+import math
 import os
 import re
 import shutil
@@ -59,6 +63,11 @@ DEMOS = ("poster", "event", "announcement")
 DESKTOP_SIZE = (1440, 1200)
 MOBILE_SIZE = (500, 1200)  # headless Chrome on Windows will not go narrower than 500px
 LETTER_POINTS = (612.0, 792.0)
+SOCIAL_SIZES = {"square": (1080, 1080), "story": (1080, 1920), "facebook": (1920, 1005)}
+SOCIAL_REPORT_RE = re.compile(
+    r'<script\b[^>]*\bid=["\']factory-social-report["\'][^>]*>(.*?)</script\s*>',
+    re.IGNORECASE | re.DOTALL,
+)
 REPORT_RE = re.compile(
     r'<script\b[^>]*\bid=["\']factory-check-report["\'][^>]*>(.*?)</script\s*>',
     re.IGNORECASE | re.DOTALL,
@@ -72,6 +81,7 @@ CONTACT_RE = re.compile(
 OWNED_ARTIFACTS = frozenset(
     [f"{demo}-{view}.png" for demo in DEMOS for view in ("desktop", "mobile")]
     + [f"{demo}-letter.pdf" for demo in DEMOS]
+    + [f"{demo}-{kind}.png" for demo in DEMOS for kind in SOCIAL_SIZES]
 )
 
 
@@ -149,8 +159,80 @@ def _run_chrome(chrome: Path, profile: Path, args: list[str], label: str) -> Chr
     return ChromeResult(completed.stdout, completed.stderr)
 
 
-def _page_url(demo: str) -> str:
-    return f"{FACTORY_PAGE.as_uri()}?{urlencode({'demo': demo, 'check': '1'})}"
+def _page_url(demo: str, social: bool = False) -> str:
+    query = {"demo": demo, "check": "1"}
+    if social:
+        query["social"] = "1"
+    return f"{FACTORY_PAGE.as_uri()}?{urlencode(query)}"
+
+
+def _check_social(dumped_dom: str, output_dir: Path, demo: str) -> None:
+    """Decode actual canvas output, independently checking PNG dimensions and pixels."""
+    matches = SOCIAL_REPORT_RE.findall(dumped_dom)
+    if not matches:
+        raise CheckFailure(f"{demo} social: no factory-social-report; export checks did not finish")
+    try:
+        report = json.loads(matches[-1])
+        if not isinstance(report, dict) or report.get("ready") is not True:
+            raise CheckFailure(f"{demo} social: rendering failed: {report}")
+        images = report.get("images", {})
+        for kind, size in SOCIAL_SIZES.items():
+            label = f"{demo} {kind}"
+            value = images.get(kind)
+            prefix = "data:image/png;base64,"
+            if not isinstance(value, str) or not value.startswith(prefix):
+                raise CheckFailure(f"{label}: renderer did not return a PNG data URL")
+            data = base64.b64decode(value[len(prefix):], validate=True)
+            with Image.open(io.BytesIO(data)) as image:
+                image.load()
+                if image.format != "PNG" or image.size != size:
+                    raise CheckFailure(f"{label}: expected PNG {size}, got {image.format} {image.size}")
+                if image.convert("RGBA").getchannel("A").getextrema() != (255, 255):
+                    raise CheckFailure(f"{label}: export contains transparent pixels")
+            path = output_dir / f"{demo}-{kind}.png"
+            path.write_bytes(data)
+            _check_screenshot(path, size, label)
+            _check_social_layout(report.get("diagnostics", {}).get(kind), size, kind, label)
+    except CheckFailure:
+        raise
+    except Exception as exc:
+        raise CheckFailure(f"{demo} social: invalid export report or PNG: {exc}") from exc
+
+
+def _check_social_layout(layout: Any, size: tuple[int, int], kind: str, label: str) -> None:
+    """Check the measured canvas text, including the story's protected top/bottom."""
+    if not isinstance(layout, dict) or not isinstance(layout.get("fits"), dict):
+        raise CheckFailure(f"{label}: missing measured canvas layout diagnostics")
+    top, bottom = (250, size[1] - 250) if kind == "story" else (0, size[1])
+
+    def check_box(box: Any, name: str) -> None:
+        if not isinstance(box, dict) or any(
+            isinstance(box.get(key), bool) or not isinstance(box.get(key), (int, float))
+            or not math.isfinite(box[key]) for key in ("x", "y", "width", "height")
+        ):
+            raise CheckFailure(f"{label}: {name} has invalid bounds")
+        if (box["width"] <= 0 or box["height"] <= 0 or box["x"] < 0 or box["y"] < top
+                or box["x"] + box["width"] > size[0] + 0.5
+                or box["y"] + box["height"] > bottom + 0.5):
+            raise CheckFailure(f"{label}: {name} extends outside the canvas or story safe area")
+
+    required = {"headline", "date", "place", "contact"}
+    if kind == "story":
+        required.update(("body", "cta"))
+    fits = layout["fits"]
+    if not required.issubset(fits):
+        raise CheckFailure(f"{label}: required text measurements are missing")
+    for name, fit in fits.items():
+        check_box(fit.get("box"), name)
+        if not fit.get("lines"):
+            raise CheckFailure(f"{label}: demo {name} is empty")
+        if fit.get("shortened") is not False:
+            raise CheckFailure(f"{label}: demo {name} was shortened")
+        if len(fit["lines"]) * fit["lineHeight"] > fit["box"]["height"] + 0.5:
+            raise CheckFailure(f"{label}: {name} text exceeds its height")
+        if fit["maxLineWidth"] > fit["box"]["width"] + 0.5:
+            raise CheckFailure(f"{label}: {name} text exceeds its width")
+    check_box(layout.get("logoBox"), "logo")
 
 
 def _extract_report(dumped_dom: str, label: str) -> dict[str, Any]:
@@ -325,13 +407,15 @@ def _render_dom_and_png(
             f"--window-size={size[0]},{size[1]}",
             "--dump-dom",
             f"--screenshot={screenshot}",
-            _page_url(demo),
+            _page_url(demo, social=suffix == "desktop"),
         ],
         label,
     )
     report = _extract_report(result.stdout, label)
     _check_report_details(report, demo, label, size[0])
     _check_screenshot(screenshot, size, label)
+    if suffix == "desktop":
+        _check_social(result.stdout, output_dir, demo)
     return report
 
 
@@ -341,9 +425,10 @@ def _render_dom_and_png_with_retry(chrome, profile, output_dir, demo, size, suff
         try:
             return _render_dom_and_png(chrome, profile, output_dir, demo, size, suffix)
         except CheckFailure as exc:
-            if "ready=true" not in str(exc) or attempt == attempts:
+            transient = ("ready=true" in str(exc)) or ("invalid export report" in str(exc)) or ("no factory-social-report" in str(exc))
+            if not transient or attempt == attempts:
                 raise
-            print(f"RETRY {demo} {suffix}: report not ready on attempt {attempt}; rendering again")
+            print(f"RETRY {demo} {suffix}: transient render race on attempt {attempt} ({str(exc)[:60]}); rendering again")
 
 
 def _render_pdf(chrome: Path, profile: Path, output_dir: Path, demo: str) -> None:
@@ -367,6 +452,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--keep",
         action="store_true",
         help="keep PNG and PDF evidence under tools/html/factory/",
+    )
+    parser.add_argument(
+        "--social",
+        action="store_true",
+        help="check only desktop and the three social PNG sizes (also included in the default run)",
     )
     parser.add_argument(
         "--chrome",
@@ -417,10 +507,12 @@ def main(argv: list[str] | None = None) -> int:
                 _render_dom_and_png_with_retry(
                     chrome, profile, output_dir, demo, DESKTOP_SIZE, "desktop"
                 )
-                _render_pdf(chrome, profile, output_dir, demo)
-                print(f"PASS {demo}: desktop report, nonblank PNG, 1-page Letter PDF")
+                print(f"PASS {demo}: desktop report and square 1080x1080, story 1080x1920, Facebook 1920x1005 PNGs")
+                if not args.social:
+                    _render_pdf(chrome, profile, output_dir, demo)
+                    print(f"PASS {demo}: nonblank PNG, 1-page Letter PDF")
 
-            for demo in DEMOS:
+            for demo in (() if args.social else DEMOS):
                 _render_dom_and_png_with_retry(
                     chrome, profile, output_dir, demo, MOBILE_SIZE, "mobile"
                 )
@@ -428,7 +520,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.keep:
             print(f"Evidence kept in {output_dir}")
-    print("PASS Flyer Factory: all 3 layouts passed desktop, print, and mobile checks")
+    checks = "desktop and social" if args.social else "desktop, print, mobile, and social"
+    print(f"PASS Flyer Factory: all 3 layouts passed {checks} checks")
     return 0
 
 

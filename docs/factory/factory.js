@@ -33,15 +33,13 @@
   function fitText(element, text, minSize) {
     element.style.removeProperty('font-size');
     element.textContent = text;
-    let high = parseFloat(getComputedStyle(element).fontSize);
-    let low = minSize;
+    const high = parseFloat(getComputedStyle(element).fontSize);
     if (!fits(element)) {
-      for (let i = 0; i < 10; i++) {
-        const size = (low + high) / 2;
-        element.style.fontSize = `${size}px`;
-        if (fits(element)) low = size; else high = size;
-      }
-      element.style.fontSize = `${low}px`;
+      const size = window.factoryTextFit.boundedFontSize(minSize, high, candidate => {
+        element.style.fontSize = `${candidate}px`;
+        return fits(element);
+      }, 10);
+      element.style.fontSize = `${size}px`;
     }
     if (!fits(element)) shorten(element, text);
   }
@@ -79,7 +77,7 @@
       const names = {body: 'body', cta: 'call to action', headline: 'headline', subheadline: 'subheadline', date: 'date & time', place: 'place', contact: 'contact line'};
       $('next-step').textContent = `Shorten your ${shortened.map(key => names[key]).join(', ')}: the preview ends with “…”. Your full text is still in the form.`;
     } else {
-      $('next-step').textContent = 'Next: check the details in your preview, then save your PDF.';
+      $('next-step').textContent = 'Next: check the details in your preview, then save your PDF or download a social image.';
     }
   }
 

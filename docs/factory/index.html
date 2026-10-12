@@ -7,7 +7,9 @@
   <title>Flyer Factory · CultureShyft Media</title>
   <link rel="icon" href="../logo/icons/favicon.ico">
   <link rel="stylesheet" href="factory.css">
+  <script src="fit.js" defer></script>
   <script src="factory.js" defer></script>
+  <script src="social.js" defer></script>
 </head>
 <body>
   <header class="app-header">
@@ -67,8 +69,15 @@
       <div class="export-panel">
         <p class="eyebrow">03 / TAKE IT WITH YOU</p>
         <p id="next-step" role="status">Start with a headline and contact line.</p>
-        <button type="button" id="print-button">Save as PDF <span aria-hidden="true">↗</span></button>
+        <div class="export-actions">
+          <button type="button" id="print-button">Save as PDF <span aria-hidden="true">↗</span></button>
+          <button type="button" class="social-button" data-social-export="square">Download Instagram square <span>1080 × 1080</span></button>
+          <button type="button" class="social-button" data-social-export="story">Download Instagram story <span>1080 × 1920</span></button>
+          <button type="button" class="social-button" data-social-export="facebook">Download Facebook event cover <span>1920 × 1005</span></button>
+        </div>
         <p class="print-help">Choose Save as PDF, Letter, no margins, background graphics on.</p>
+        <p class="print-help">Square keeps the headline, date and place clear. Story adds the body and call to action.</p>
+        <p class="print-help" id="social-status" role="status">Social downloads are full-size PNG files, ready to post.</p>
       </div>
     </section>
   </main>
