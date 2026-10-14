@@ -825,6 +825,7 @@
   });
   window.factoryReport = () => active ? report() : (typeof previousReport === 'function' ? previousReport() : {overflow: [], missing: ['factory report unavailable'], ready: false, diagnostics: {}});
 
+  if (demoMode) open(DEMO); // Open before load so headless print captures the invoice, not the flyer.
   const priorReady = Promise.resolve(window.factoryReady);
   window.factoryReady = (async () => {
     try { await priorReady; } catch (error) { runtimeErrors.push(error instanceof Error ? error.message : String(error)); }
