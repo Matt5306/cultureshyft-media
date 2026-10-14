@@ -7,6 +7,7 @@
   <title>Flyer Factory · CultureShyft Media</title>
   <link rel="icon" href="../logo/icons/favicon.ico">
   <link rel="stylesheet" href="factory.css">
+  <link rel="stylesheet" href="invoice.css">
   <script>
     window.factoryRuntimeErrors = [];
     window.factoryRecordRuntimeError = function (error) {
@@ -27,9 +28,11 @@
   <script src="vendor/qrcode.min.js" defer></script>
   <script src="photo.js" defer></script>
   <script src="qr.js" defer></script>
+  <script src="share.js" defer></script>
   <script src="factory.js" defer></script>
   <script src="briefs.js" defer></script>
   <script src="social.js" defer></script>
+  <script src="invoice.js" defer></script>
 </head>
 <body>
   <header class="app-header">
@@ -41,6 +44,9 @@
       <div class="editor-tools"><p class="eyebrow">01 / MAKE IT YOURS</p><button type="button" class="quiet-button" id="open-briefs" aria-controls="briefs-drawer" aria-expanded="false">My flyers</button></div>
       <h1 id="page-title">A brief in.<br>A flyer out.</h1>
       <p class="intro">Add the details. Watch your flyer take shape.</p>
+      <label for="preset">Start with a sample</label>
+      <select id="preset"><option value="">Choose an occasion…</option></select>
+      <p class="field-help" id="preset-status" role="status">Samples use made-up details. Replace them before sharing.</p>
       <form id="brief" autocomplete="off">
         <label for="layout">Layout</label>
         <select id="layout" name="layout">
@@ -76,6 +82,17 @@
           <input type="range" id="photo-zoom" min="100" max="250" step="1" value="100">
           <p class="field-help">Drag the photo in the flyer preview to choose what stays in frame.</p>
         </div>
+
+        <details class="order-details">
+          <summary>Customer &amp; requested extras</summary>
+          <label for="clientName">Your name or business</label><input id="clientName" name="clientName" maxlength="100">
+          <label for="clientEmail">Your reply email</label><input id="clientEmail" name="clientEmail" type="email" maxlength="160">
+          <label for="extraSizes">Extra sizes · $5 each</label><select id="extraSizes" name="extraSizes"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select>
+          <label for="extraEdits">Extra edit rounds · $5 each</label><select id="extraEdits" name="extraEdits"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select>
+          <label class="check-label"><input type="checkbox" name="printReady" id="printReady"> Print preparation · +$10</label>
+          <label class="check-label"><input type="checkbox" name="rush" id="rush"> Rush · +$15, if available</label>
+          <p class="field-help">One edit round and the Instagram square are included. The factory PDF is for home/office printing; commercial print preparation requires your printer’s specifications.</p>
+        </details>
       </form>
       <div class="brief-actions"><button type="button" id="save-brief">Save to My flyers</button><button type="button" class="quiet-button" id="export-brief">Export brief</button><label class="quiet-button import-label" for="import-brief">Import brief</label><input type="file" id="import-brief" accept="application/json,.json" hidden></div>
       <p class="session-note" id="save-status" role="status">Your current brief autosaves on this device.</p>

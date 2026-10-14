@@ -222,7 +222,7 @@
     const documentScrollWidth = document.documentElement.scrollWidth;
     const documentClientWidth = document.documentElement.clientWidth;
     if (!matchMedia('print').matches && documentScrollWidth > documentClientWidth + 1) overflow.push('page: horizontal scroll');
-    return {overflow, missing, ready, diagnostics: {documentScrollWidth, documentClientWidth, viewportWidth: innerWidth, layout: flyer.dataset.layout, logoPresent, contactPresent, qrExpected, qrPresent, qrError: window.factoryQR?.getLastError?.() || qrInvalid || '', runtimeErrors: [...runtimeErrors], shortened: [...shortened], flyerWidth: flyer.offsetWidth, flyerHeight: flyer.offsetHeight}};
+    return {overflow, missing, ready, diagnostics: {documentScrollWidth, documentClientWidth, viewportWidth: innerWidth, layout: flyer.dataset.layout, preset: $('preset').value, logoPresent, contactPresent, qrExpected, qrPresent, qrError: window.factoryQR?.getLastError?.() || qrInvalid || '', runtimeErrors: [...runtimeErrors], shortened: [...shortened], flyerWidth: flyer.offsetWidth, flyerHeight: flyer.offsetHeight}};
   };
 
   function publishReport() {
@@ -366,9 +366,38 @@
   });
   window.factoryBrief = Object.freeze({collect: collectBrief, apply: applyBrief});
 
+  const presetReady = (async () => {
+    try {
+      const response = await fetch('../factory/presets.json');
+      if (!response.ok) throw new Error('Samples could not load.');
+      const choices = await response.json();
+      window.factoryPresets = choices;
+      for (const [id, preset] of Object.entries(choices)) {
+        const option = document.createElement('option'); option.value = id; option.textContent = preset.label; $('preset').append(option);
+      }
+      function usePreset(id) {
+        const preset = choices[id]; if (!preset) return;
+        // Keep customer information and the photo when changing the copy.
+        const current = collectBrief();
+        applyBrief({...current, values: {...current.values, ...preset.values}});
+        $('preset-status').textContent = 'Sample loaded. Replace the example date, place, contact and offer before sharing.';
+      }
+      $('preset').addEventListener('change', () => usePreset($('preset').value));
+      if (!params.has('brief') && Object.hasOwn(choices, demo)) { $('preset').value = demo; usePreset(demo); }
+    } catch (_) {
+      $('preset-status').textContent = 'Samples could not load. Your brief is safe. Fill in the details below, or reload to try again.';
+    }
+    if (params.has('brief')) {
+      try {
+        applyBrief(window.factoryShare.decode(params.get('brief')));
+        $('preset-status').textContent = 'Customer brief loaded. Check the details, then save to My flyers.';
+      } catch (error) { $('preset-status').textContent = `${error.message} Saved flyers are unchanged. Ask for the copied brief text.`; }
+    }
+  })();
   updatePhotoVisual();
   render();
   window.factoryPageReady = (async () => {
+    await presetReady;
     try {
       const fonts = await document.fonts.load('800 32px Manrope');
       await document.fonts.ready;

@@ -1,0 +1,122 @@
+{
+  "sunday-service": {
+    "label": "Sunday service",
+    "values": {
+      "layout": "event",
+      "headline": "A place for you.",
+      "subheadline": "Start your week with worship and community.",
+      "date": "Sunday, October 25 · 10 AM",
+      "place": "Grace Church · 120 Main St",
+      "body": "Worship together.\nMeet your neighbors.\nEveryone is welcome.",
+      "cta": "Join us this Sunday.",
+      "contact": "hello@example.com · 313-555-0142",
+      "qrUrl": "",
+      "accent": true
+    }
+  },
+  "youth-night": {
+    "label": "Youth night",
+    "values": {
+      "layout": "poster",
+      "headline": "Your Friday starts here.",
+      "subheadline": "Good friends. Real conversation. Room for you.",
+      "date": "Friday, October 23 · 6–8 PM",
+      "place": "Grace Youth Room · 120 Main St",
+      "body": "Ages 13–18. Games and food.\nAdult leaders on site.\nParents: contact us with questions.",
+      "cta": "Bring a friend.",
+      "contact": "hello@example.com · 313-555-0142",
+      "qrUrl": "",
+      "accent": true
+    }
+  },
+  "fundraiser": {
+    "label": "Fundraiser",
+    "values": {
+      "layout": "event",
+      "headline": "Give a little. Build more.",
+      "subheadline": "Help stock the neighborhood food pantry.",
+      "date": "Saturday, October 24 · 2–5 PM",
+      "place": "Community Hall · 120 Main St",
+      "body": "Music and neighbors.\nEvery donation helps.\nFree entry. All welcome.",
+      "cta": "Give what you can.",
+      "contact": "hello@example.com · 313-555-0142",
+      "qrUrl": "",
+      "accent": true
+    }
+  },
+  "concert-worship-night": {
+    "label": "Concert / worship night",
+    "values": {
+      "layout": "poster",
+      "headline": "One room. One sound.",
+      "subheadline": "An evening of music, worship and connection.",
+      "date": "Friday, October 30 · 7 PM",
+      "place": "Grace Church · 120 Main St",
+      "body": "Live music. Open doors.\nBring the people you love.\nFree entry. Doors open at 6:30 PM.",
+      "cta": "Make room for a good night.",
+      "contact": "hello@example.com · 313-555-0142",
+      "qrUrl": "",
+      "accent": true
+    }
+  },
+  "small-business-sale": {
+    "label": "Small-business sale",
+    "values": {
+      "layout": "announcement",
+      "headline": "Good finds. Small prices.",
+      "subheadline": "Save 20% on selected goods this weekend.",
+      "date": "October 24–25 · 10 AM–5 PM",
+      "place": "Neighborhood Shop · 120 Main St",
+      "body": "Shop local favorites.\nSelected items only, while supplies last.\nFind something that feels like you.",
+      "cta": "Stop in this weekend.",
+      "contact": "hello@example.com · 313-555-0142",
+      "qrUrl": "",
+      "accent": true
+    }
+  },
+  "grand-opening": {
+    "label": "Grand opening",
+    "values": {
+      "layout": "announcement",
+      "headline": "Your new favorite spot.",
+      "subheadline": "A new local shop. A warm welcome.",
+      "date": "Saturday, October 24 · 10 AM",
+      "place": "Neighborhood Shop · 120 Main St",
+      "body": "Meet the team. Explore the space.\nFind something made for you.\nEveryone is welcome.",
+      "cta": "Come meet your neighbors.",
+      "contact": "hello@example.com · 313-555-0142",
+      "qrUrl": "",
+      "accent": true
+    }
+  },
+  "community-event": {
+    "label": "Community event",
+    "values": {
+      "layout": "event",
+      "headline": "Meet your neighbors.",
+      "subheadline": "Good food. Local music. A place for everyone.",
+      "date": "Saturday, October 24 · 2–6 PM",
+      "place": "Community Park · 120 Main St",
+      "body": "Music and local makers.\nBring the whole family.\nFree entry. All welcome.",
+      "cta": "Come through. Bring a friend.",
+      "contact": "hello@example.com · 313-555-0142",
+      "qrUrl": "",
+      "accent": true
+    }
+  },
+  "hiring": {
+    "label": "Hiring",
+    "values": {
+      "layout": "announcement",
+      "headline": "Bring your next move here.",
+      "subheadline": "We are hiring a part-time shop assistant.",
+      "date": "Apply by October 30",
+      "place": "Neighborhood Shop · Detroit",
+      "body": "Help customers. Keep things moving.\nEvening and weekend shifts.\nAsk us about pay and hours.",
+      "cta": "Email your experience to apply.",
+      "contact": "hello@example.com · 313-555-0142",
+      "qrUrl": "",
+      "accent": false
+    }
+  }
+}

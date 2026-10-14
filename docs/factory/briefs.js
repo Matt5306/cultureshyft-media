@@ -4,7 +4,7 @@
   const DRAFT_KEY = 'cultureshyft.factory.draft.v1';
   const BRIEFS_KEY = 'cultureshyft.factory.briefs.v1';
   const params = new URLSearchParams(location.search);
-  let demoMode = params.has('demo');
+  let demoMode = params.has('demo') || params.has('brief');
   let activeId = null;
   let deletedActive = false;
   let timer = 0;
@@ -182,13 +182,14 @@
   function validateImport(candidate) {
     const payload = candidate?.payload || candidate;
     if (!payload || payload.version !== 1 || !payload.values || typeof payload.values !== 'object') throw new Error('That file is not a Flyer Factory brief.');
-    const maximums = {layout: 20, headline: 140, subheadline: 180, date: 100, place: 140, body: 450, cta: 100, contact: 160, qrUrl: 140};
+    const maximums = {layout: 20, headline: 140, subheadline: 180, date: 100, place: 140, body: 450, cta: 100, contact: 160, qrUrl: 140, clientName: 100, clientEmail: 160, extraSizes: 2, extraEdits: 2};
     for (const [key, maximum] of Object.entries(maximums)) {
       if (Object.hasOwn(payload.values, key) && typeof payload.values[key] !== 'string') throw new Error(`The ${key} field is damaged.`);
       if (String(payload.values[key] || '').length > maximum) throw new Error(`The ${key} field is too long.`);
     }
     if (!['poster', 'event', 'announcement'].includes(payload.values.layout || 'poster')) throw new Error('The layout is not recognized.');
-    if (Object.hasOwn(payload.values, 'accent') && typeof payload.values.accent !== 'boolean') throw new Error('The color setting is damaged.');
+    for (const flag of ['accent', 'printReady', 'rush']) if (Object.hasOwn(payload.values, flag) && typeof payload.values[flag] !== 'boolean') throw new Error('A color or add-on setting is damaged.');
+    for (const key of ['extraSizes', 'extraEdits']) if (payload.values[key] && !/^(?:[0-9]|10)$/.test(payload.values[key])) throw new Error('The extra quantity is outside the supported range.');
     if (payload.photo?.dataUrl && !/^data:image\/(jpeg|png|webp);base64,/i.test(payload.photo.dataUrl)) throw new Error('The saved photo is damaged.');
     if (payload.photo?.dataUrl?.length > 5 * 1024 * 1024) throw new Error('The saved photo is too large for this device.');
     for (const key of ['focusX', 'focusY', 'zoom']) if (payload.photo && Object.hasOwn(payload.photo, key) && !Number.isFinite(Number(payload.photo[key]))) throw new Error('The photo crop settings are damaged.');
@@ -239,7 +240,7 @@
     }
   });
 
-  if (!params.has('demo')) {
+  if (!params.has('demo') && !params.has('brief')) {
     const draft = read(DRAFT_KEY, null);
     if (draft?.payload) {
       try { window.factoryBrief.apply(validateImport(draft)); activeId = typeof draft.activeId === 'string' ? draft.activeId : null; deletedActive = draft.deletedActive === true; status(`Recovered your autosaved brief from ${formatDate(draft.updatedAt)}.`); }

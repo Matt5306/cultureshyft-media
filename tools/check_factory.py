@@ -61,7 +61,8 @@ FACTORY_PAGE = ROOT / "docs" / "factory" / "index.html"
 DEFAULT_CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 KEEP_DIR = ROOT / "tools" / "html" / "factory"
 SCRATCH_DIR = ROOT / "tools" / "html" / "factory-tmp"
-DEMOS = ("poster", "event", "announcement", "event-qr")
+PRESETS = json.loads((ROOT / "docs/factory/presets.json").read_text(encoding="utf-8"))
+DEMOS = ("poster", "event", "announcement", "event-qr", *PRESETS)
 DESKTOP_SIZE = (1440, 1200)
 MOBILE_SIZE = (390, 844)
 LETTER_POINTS = (612.0, 792.0)
@@ -84,6 +85,8 @@ OWNED_ARTIFACTS = frozenset(
     [f"{demo}-{view}.png" for demo in DEMOS for view in ("desktop", "mobile")]
     + [f"{demo}-letter.pdf" for demo in DEMOS]
     + [f"{demo}-{kind}.png" for demo in DEMOS for kind in SOCIAL_SIZES]
+    + [f"{demo}-{view}.png" for demo in ("order", "invoice") for view in ("desktop", "mobile")]
+    + ["order-letter.pdf", "invoice-letter.pdf", "invoice-receipt.png"]
 )
 
 
@@ -334,10 +337,12 @@ def _check_report_details(
     report: dict[str, Any], demo: str, label: str, expected_width: int
 ) -> None:
     diagnostics = _diagnostics(report, label)
-    if diagnostics.get("layout") != ("event" if demo == "event-qr" else demo):
+    if diagnostics.get("layout") != ("event" if demo == "event-qr" else PRESETS.get(demo, {}).get("values", {}).get("layout", demo)):
         raise CheckFailure(
             f"{label}: expected layout {demo!r}, got {diagnostics.get('layout')!r}"
         )
+    if demo in PRESETS and diagnostics.get("preset") != demo:
+        raise CheckFailure(f"{label}: requested preset did not load")
     if diagnostics.get("logoPresent") is not True:
         raise CheckFailure(f"{label}: rendered flyer logo was not found")
     if diagnostics.get("contactPresent") is not True:
@@ -616,11 +621,15 @@ def main(argv: list[str] | None = None) -> int:
             if not args.social:
                 from check_factory_browser import check_browser
                 check_browser(chrome, output_dir)
+                from check_factory_orders import check_orders
+                check_orders(chrome, output_dir)
+                _render_pdf(chrome, profile, output_dir, "invoice")
+                print("PASS invoice: 1-page Letter PDF")
 
         if args.keep:
             print(f"Evidence kept in {output_dir}")
     checks = "desktop and social" if args.social else "desktop, print, mobile, and social"
-    print(f"PASS Flyer Factory: all 3 layouts and the QR demo passed {checks} checks")
+    print(f"PASS Flyer Factory: all layouts, presets, order and invoice passed {checks} checks")
     return 0
 
 
