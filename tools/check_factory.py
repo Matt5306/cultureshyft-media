@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Acceptance checks for the browser-only CultureShyft Flyer Factory.
 
-The checker deliberately uses the same Chrome command-line paths a person uses:
-screen rendering and printing. The page publishes its check and social reports
-as JSON script nodes when ``check=1`` is present. Installed Playwright polls
-those nodes before reading the rendered DOM and sets a real 390px phone viewport
+The checker clicks the real PNG and PDF export buttons, intercepting only the
+final print-dialog call for headless PDF capture. The page publishes its check
+report as JSON when ``check=1`` is present. Installed Playwright polls that
+report before reading the rendered DOM and sets a real 390px phone viewport
 (Windows Chrome otherwise clamps command-line windows to 500px). No browser
 download or server is used.
 
@@ -22,9 +22,7 @@ Run from anywhere::
 from __future__ import annotations
 
 import argparse
-import base64
 import html
-import io
 import json
 import math
 import os
@@ -67,10 +65,6 @@ DESKTOP_SIZE = (1440, 1200)
 MOBILE_SIZE = (390, 844)
 LETTER_POINTS = (612.0, 792.0)
 SOCIAL_SIZES = {"square": (1080, 1080), "story": (1080, 1920), "facebook": (1920, 1005)}
-SOCIAL_REPORT_RE = re.compile(
-    r'<script\b[^>]*\bid=["\']factory-social-report["\'][^>]*>(.*?)</script\s*>',
-    re.IGNORECASE | re.DOTALL,
-)
 REPORT_RE = re.compile(
     r'<script\b[^>]*\bid=["\']factory-check-report["\'][^>]*>(.*?)</script\s*>',
     re.IGNORECASE | re.DOTALL,
@@ -87,6 +81,7 @@ OWNED_ARTIFACTS = frozenset(
     + [f"{demo}-{kind}.png" for demo in DEMOS for kind in SOCIAL_SIZES]
     + [f"{demo}-{view}.png" for demo in ("order", "invoice") for view in ("desktop", "mobile")]
     + ["order-letter.pdf", "invoice-letter.pdf", "invoice-receipt.png"]
+    + [f"invoice-{failure}{suffix}" for failure in ("quota", "blocked") for suffix in ("-receipt.png", ".pdf")]
 )
 
 
@@ -197,43 +192,25 @@ def _with_runtime_errors(message: str, dumped_dom: str) -> str:
     return message + ("\nPage runtimeErrors:\n" + json.dumps(errors, indent=2, ensure_ascii=False) if errors else "\nPage runtimeErrors: []")
 
 
-def _check_social(dumped_dom: str, output_dir: Path, demo: str) -> None:
-    """Decode actual canvas output, independently checking PNG dimensions and pixels."""
-    matches = SOCIAL_REPORT_RE.findall(dumped_dom)
-    if not matches:
-        raise CheckFailure(_with_runtime_errors(
-            f"{demo} social: no factory-social-report; export checks did not finish",
-            dumped_dom,
-        ))
-    try:
-        report = json.loads(matches[-1])
-        if not isinstance(report, dict) or report.get("ready") is not True:
-            raise CheckFailure(f"{demo} social: rendering failed: {report}")
-        images = report.get("images", {})
-        for kind, size in SOCIAL_SIZES.items():
-            label = f"{demo} {kind}"
-            value = images.get(kind)
-            prefix = "data:image/png;base64,"
-            if not isinstance(value, str) or not value.startswith(prefix):
-                raise CheckFailure(f"{label}: renderer did not return a PNG data URL")
-            data = base64.b64decode(value[len(prefix):], validate=True)
-            with Image.open(io.BytesIO(data)) as image:
-                image.load()
-                if image.format != "PNG" or image.size != size:
-                    raise CheckFailure(f"{label}: expected PNG {size}, got {image.format} {image.size}")
-                if image.convert("RGBA").getchannel("A").getextrema() != (255, 255):
-                    raise CheckFailure(f"{label}: export contains transparent pixels")
-            path = output_dir / f"{demo}-{kind}.png"
-            path.write_bytes(data)
-            _check_screenshot(path, size, label)
-            layout = report.get("diagnostics", {}).get(kind)
-            _check_social_layout(layout, size, kind, label)
-            if demo == "event-qr" and kind == "story" and not layout.get("qrBox"):
-                raise CheckFailure(f"{label}: QR demo story did not render its QR code")
-    except CheckFailure:
-        raise
-    except Exception as exc:
-        raise CheckFailure(f"{demo} social: invalid export report or PNG: {exc}") from exc
+def _check_social(page: Any, output_dir: Path, demo: str) -> None:
+    """Check PNGs downloaded through the same buttons used by customers."""
+    for kind, size in SOCIAL_SIZES.items():
+        label = f"{demo} {kind}"
+        path = output_dir / f"{demo}-{kind}.png"
+        with page.expect_download(timeout=15000) as download:
+            page.locator(f'[data-social-export="{kind}"]').click()
+        download.value.save_as(str(path))
+        with Image.open(path) as image:
+            image.load()
+            if image.format != "PNG" or image.size != size:
+                raise CheckFailure(f"{label}: expected PNG {size}, got {image.format} {image.size}")
+            if image.convert("RGBA").getchannel("A").getextrema() != (255, 255):
+                raise CheckFailure(f"{label}: export contains transparent pixels")
+        _check_screenshot(path, size, label)
+        layout = page.evaluate("window.factorySocialDiagnostics()").get(kind)
+        _check_social_layout(layout, size, kind, label)
+        if demo == "event-qr" and kind == "story" and not layout.get("qrBox"):
+            raise CheckFailure(f"{label}: QR demo story did not render its QR code")
 
 
 def _check_social_layout(layout: Any, size: tuple[int, int], kind: str, label: str) -> None:
@@ -500,17 +477,15 @@ def _render_dom_and_png(
 
                 context.route("**/*", route_request)
                 page = context.pages[0] if context.pages else context.new_page()
-                page.goto(_page_url(demo, social=suffix == "desktop"), wait_until="load")
+                page.goto(_page_url(demo), wait_until="load")
                 try:
                     page.wait_for_function(
-                        """requiresSocial => {
+                        """() => {
                           const check = document.getElementById('factory-check-report');
-                          const social = document.getElementById('factory-social-report');
-                          if (!check || (requiresSocial && !social)) return false;
+                          if (!check) return false;
                           try { return JSON.parse(check.textContent).ready === true; }
                           catch (_) { return false; }
                         }""",
-                        arg=suffix == "desktop",
                         timeout=15000,
                         polling=50,
                     )
@@ -522,6 +497,8 @@ def _render_dom_and_png(
                     ) from exc
                 page.screenshot(path=str(screenshot))
                 dumped_dom = page.content()
+                if suffix == "desktop":
+                    _check_social(page, output_dir, demo)
             finally:
                 context.close()
     except CheckFailure:
@@ -534,24 +511,45 @@ def _render_dom_and_png(
     report = _extract_report(dumped_dom, label)
     _check_report_details(report, demo, label, size[0])
     _check_screenshot(screenshot, size, label)
-    if suffix == "desktop":
-        _check_social(dumped_dom, output_dir, demo)
     return report
 
 
-def _render_pdf(chrome: Path, profile: Path, output_dir: Path, demo: str) -> None:
-    output = output_dir / f"{demo}-letter.pdf"
-    _run_chrome(
-        chrome,
-        profile,
-        [
-            "--no-pdf-header-footer",
-            f"--print-to-pdf={output}",
-            _page_url(demo),
-        ],
-        f"{demo} PDF",
-    )
+def _print_from_button(page: Any, output: Path, demo: str) -> None:
+    # Headless Chrome has no print dialog. Intercept only that final browser
+    # boundary; validation and print preparation must run through the real UI.
+    page.evaluate("window.__printRequested = false; window.print = () => { window.__printRequested = true; }")
+    page.locator('#invoice-print' if demo == 'invoice' else '#print-button').click()
+    page.wait_for_function("window.__printRequested === true", timeout=15000)
+    page.pdf(path=str(output), prefer_css_page_size=True, print_background=True)
+    page.evaluate("window.dispatchEvent(new Event('afterprint'))")
     _check_pdf(output, demo)
+
+
+def _render_pdf(chrome: Path, profile: Path, output_dir: Path, demo: str) -> None:
+    from playwright.sync_api import sync_playwright
+    external = []
+    with sync_playwright() as pw:
+        context = pw.chromium.launch_persistent_context(
+            str(profile), executable_path=str(chrome), headless=True,
+            viewport={"width": DESKTOP_SIZE[0], "height": DESKTOP_SIZE[1]},
+            args=['--no-sandbox', '--disable-gpu', '--disable-background-networking',
+                  '--disable-component-update', '--allow-file-access-from-files'])
+        try:
+            def route_request(route: Any) -> None:
+                if route.request.url.startswith(('http:', 'https:')):
+                    external.append(route.request.url)
+                    route.abort()
+                else:
+                    route.continue_()
+            context.route('**/*', route_request)
+            page = context.pages[0]
+            page.goto(_page_url(demo))
+            page.evaluate('() => window.factoryReady')
+            _print_from_button(page, output_dir / f"{demo}-letter.pdf", demo)
+            if external:
+                raise CheckFailure(f"{demo} PDF: unexpected network requests: {external}")
+        finally:
+            context.close()
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -629,7 +627,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.keep:
             print(f"Evidence kept in {output_dir}")
     checks = "desktop and social" if args.social else "desktop, print, mobile, and social"
-    print(f"PASS Flyer Factory: all layouts, presets, order and invoice passed {checks} checks")
+    subjects = "all layouts and presets" if args.social else "all layouts, presets, order and invoice"
+    print(f"PASS Flyer Factory: {subjects} passed {checks} checks")
     return 0
 
 

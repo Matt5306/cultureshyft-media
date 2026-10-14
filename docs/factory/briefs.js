@@ -4,7 +4,8 @@
   const DRAFT_KEY = 'cultureshyft.factory.draft.v1';
   const BRIEFS_KEY = 'cultureshyft.factory.briefs.v1';
   const params = new URLSearchParams(location.search);
-  let demoMode = params.has('demo') || params.has('brief');
+  const hasSharedBrief = params.has('brief') || new URLSearchParams(location.hash.slice(1)).has('brief');
+  let demoMode = params.has('demo') || hasSharedBrief;
   let activeId = null;
   let deletedActive = false;
   let timer = 0;
@@ -132,6 +133,7 @@
         action('Open', 'brief-open', () => {
           if (!demoMode && !flush({keepInLibrary: true})) return;
           window.factoryBrief.apply(entry.payload); activeId = entry.id; closeDrawer();
+          demoMode = false;
           status(`Opened “${titleOf(entry.payload)}.” Changes autosave as your current brief.`); autosave();
         }),
         action('Duplicate', 'quiet-button', () => {
@@ -240,7 +242,7 @@
     }
   });
 
-  if (!params.has('demo') && !params.has('brief')) {
+  if (!params.has('demo') && !hasSharedBrief) {
     const draft = read(DRAFT_KEY, null);
     if (draft?.payload) {
       try { window.factoryBrief.apply(validateImport(draft)); activeId = typeof draft.activeId === 'string' ? draft.activeId : null; deletedActive = draft.deletedActive === true; status(`Recovered your autosaved brief from ${formatDate(draft.updatedAt)}.`); }

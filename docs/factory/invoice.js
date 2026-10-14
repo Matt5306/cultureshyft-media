@@ -52,6 +52,7 @@
   let active = false;
   let currentNumber = '';
   let demoPayment = null;
+  let sessionPayment = null;
   let previousReport = window.factoryReport;
   let scaleObserver = null;
   let initialized = false;
@@ -144,6 +145,7 @@
 
   function paymentSettings() {
     if (demoPayment) return {...demoPayment};
+    if (sessionPayment) return {...sessionPayment};
     const saved = storageRead(STORAGE.settings, {}, value => Boolean(
       value && typeof value === 'object' && !Array.isArray(value)
       && ['cashApp', 'zelle', 'paypal'].every(key => value[key] === undefined || typeof value[key] === 'string')
@@ -235,7 +237,7 @@
           <label for="invoice-notes">Note to client</label>
           <textarea id="invoice-notes" rows="3" maxlength="260"></textarea>
           <p class="invoice-storage-status" id="invoice-storage-status" role="status"></p>
-          <div class="invoice-editor-actions"><button type="button" class="quiet-button" id="invoice-restore" hidden>Restore saved draft</button><button type="button" class="quiet-button" id="invoice-draft-repair" hidden>Archive damaged draft</button><button type="button" class="quiet-button" id="invoice-counter-repair" hidden>Archive and reset counter</button><button type="button" class="quiet-button" id="invoice-new">Start new invoice</button></div>
+          <div class="invoice-editor-actions"><button type="button" class="quiet-button" id="invoice-restore" hidden>Restore saved draft</button><button type="button" class="quiet-button" id="invoice-discard" hidden>Discard saved draft and save this invoice</button><button type="button" class="quiet-button" id="invoice-draft-repair" hidden>Archive damaged draft</button><button type="button" class="quiet-button" id="invoice-counter-repair" hidden>Archive and reset counter</button><button type="button" class="quiet-button" id="invoice-new">Start new invoice</button></div>
         </form>
         <div class="invoice-preview-column">
           <div class="invoice-preview-head"><div><p class="eyebrow">03 / CHECK IT</p><h3>Ready to send.</h3></div><span>8.5 × 11 IN</span></div>
@@ -411,16 +413,22 @@
     fitPreviewText($('invoice-note-view'), 10, 8);
     const missing = validationMissing(state);
     $('invoice-next-step').textContent = missing.length
-      ? `Next: ${missing[0]}. Your invoice stays saved on this device.`
+      ? `Next: ${missing[0]}. Check the saving status.`
       : `Ready: collect ${money(state.totals.deposit)} now; ${money(state.totals.balance)} is due on delivery.`;
-    let draftSaved = true;
-    if (active && initialized && !demoMode) draftSaved = storageWrite(STORAGE.draft, state);
+    let draftSaved = false;
+    if (active && initialized && !demoMode && !recoverableDraft) draftSaved = storageWrite(STORAGE.draft, state);
+    $('invoice-restore').hidden = demoMode || !recoverableDraft;
+    $('invoice-discard').hidden = demoMode || !recoverableDraft;
     $('invoice-draft-repair').hidden = !damagedStorage.has(STORAGE.draft);
     $('invoice-counter-repair').hidden = !damagedStorage.has(STORAGE.counter) && !counterNeedsManual;
     $('invoice-counter-repair').textContent = damagedStorage.has(STORAGE.counter) ? 'Archive damaged counter' : 'Save verified number';
-    $('invoice-storage-status').textContent = storageWarning || (draftSaved
+    const savingStatus = storageWarning || (recoverableDraft
+      ? 'Your saved invoice draft is preserved. Restore it, or explicitly discard it to save this invoice. This open invoice is only on this page.'
+      : draftSaved
       ? 'Invoice changes autosave on this device.'
       : 'This draft is only on this page. Download it before closing.');
+    // Keep one persistent warning, without re-announcing it on every input.
+    if ($('invoice-storage-status').textContent !== savingStatus) $('invoice-storage-status').textContent = savingStatus;
     scalePreview();
     publishReport();
   }
@@ -472,7 +480,6 @@
     $('invoice-studio').hidden = false;
     document.body.classList.add('invoice-open');
     document.querySelector('.workspace')?.setAttribute('aria-hidden', 'true');
-    $('invoice-restore').hidden = demoMode || !recoverableDraft?.invoiceNumber || recoverableDraft.invoiceNumber === currentNumber;
     $('invoice-draft-repair').hidden = !damagedStorage.has(STORAGE.draft);
     $('invoice-counter-repair').hidden = !damagedStorage.has(STORAGE.counter) && !counterNeedsManual;
     $('invoice-counter-repair').textContent = damagedStorage.has(STORAGE.counter) ? 'Archive damaged counter' : 'Save verified number';
@@ -491,6 +498,7 @@
   }
 
   function newInvoice() {
+    if (!demoMode && initialized && !recoverableDraft) recoverableDraft = collectState();
     currentNumber = '';
     demoPayment = null;
     populateFromBrief(null, true);
@@ -533,8 +541,9 @@
       return;
     }
     demoPayment = null;
+    sessionPayment = settings;
     const saved = storageWrite(STORAGE.settings, settings);
-    $('invoice-settings-status').textContent = saved ? 'Saved. These payment details will appear on new invoices.' : storageWarning;
+    $('invoice-settings-status').textContent = saved ? 'Saved. These payment details will appear on new invoices.' : 'These payment details are available for this session. Close settings and download the invoice before leaving this page.';
     $('invoice-settings-repair').hidden = !damagedStorage.has(STORAGE.settings);
     render();
     if (saved) setTimeout(closeSettings, 500);
@@ -788,6 +797,11 @@
     $('invoice-close').addEventListener('click', close);
     $('invoice-new').addEventListener('click', newInvoice);
     $('invoice-restore').addEventListener('click', restoreDraft);
+    $('invoice-discard').addEventListener('click', () => {
+      // Only release the recovery copy once its replacement is safely stored.
+      if (storageWrite(STORAGE.draft, collectState())) recoverableDraft = null;
+      render();
+    });
     $('invoice-draft-repair').addEventListener('click', repairDraft);
     $('invoice-counter-repair').addEventListener('click', repairCounter);
     $('invoice-settings-open').addEventListener('click', openSettings);

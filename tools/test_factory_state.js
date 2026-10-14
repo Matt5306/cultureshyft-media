@@ -12,9 +12,10 @@ const libraryKey = 'cultureshyft.factory.briefs.v1';
 const clone = value => JSON.parse(JSON.stringify(value));
 const payload = () => ({version: 1, values: {layout: 'poster', headline: 'Keep my work', contact: 'mark@example.com', accent: true}, photo: {dataUrl: '', focusX: 0, focusY: 1, zoom: 1.8}});
 
-function harness(initial = {}) {
+function harness(initial = {}, location = {search: '', hash: ''}) {
   const storage = new Map(Object.entries(initial));
   let rejectWrites = false;
+  let pendingSave = null;
   const nodes = new Map();
   class Node {
     constructor() { this.children = []; this.textContent = ''; this.listeners = {}; this.classList = {add() {}, remove() {}, contains() {return false;}}; }
@@ -32,14 +33,14 @@ function harness(initial = {}) {
   };
   let current = payload();
   const window = {addEventListener() {}, dispatchEvent() {}, factoryBrief: {collect: () => clone(current), apply: value => {current = clone(value);}}};
-  const sandbox = {window, document, location: {search: ''}, URLSearchParams, URL, Blob, console,
-    setTimeout() {return 1;}, clearTimeout() {},
+  const sandbox = {window, document, location, URLSearchParams, URL, Blob, console,
+    setTimeout(callback) {pendingSave = callback; return 1;}, clearTimeout() {pendingSave = null;},
     CustomEvent: class {constructor(type, options) {this.type = type; this.detail = options?.detail;}},
     localStorage: {getItem: key => storage.get(key) ?? null, setItem(key, value) {if (rejectWrites) throw new Error('Quota exceeded'); storage.set(key, value);}},
   };
   vm.createContext(sandbox);
   for (const file of ['photo.js', 'briefs.js']) vm.runInContext(fs.readFileSync(path.join(factory, file), 'utf8'), sandbox, {filename: file});
-  return {window, nodes, storage, current: () => current, reject: () => {rejectWrites = true;}};
+  return {window, nodes, storage, current: () => current, tick: () => pendingSave?.(), reject: () => {rejectWrites = true;}};
 }
 
 const healthy = harness();
@@ -52,6 +53,22 @@ const beforeFailure = healthy.storage.get(draftKey);
 assert.equal(healthy.window.factoryBriefs.flush(), false);
 assert.equal(healthy.storage.get(draftKey), beforeFailure, 'quota failure must preserve the previous save');
 assert.match(healthy.nodes.get('save-status').textContent, /export/i);
+
+for (const location of [{search: '?brief=shared', hash: ''}, {search: '', hash: '#brief=shared'}]) {
+  const saved = payload(); saved.values.headline = 'Saved library flyer';
+  const shared = harness({
+    [libraryKey]: JSON.stringify([{id: 'saved', payload: saved}]),
+    [draftKey]: JSON.stringify({payload: saved})
+  }, location);
+  assert.equal(shared.current().values.headline, 'Keep my work', 'shared preview must not load the device draft');
+  shared.window.factoryBriefs.openDrawer();
+  shared.nodes.get('brief-list').children[0].children[1].children[0].listeners.click();
+  shared.current().values.headline = 'Edited after opening';
+  shared.nodes.get('brief').listeners.input();
+  shared.tick();
+  assert.equal(JSON.parse(shared.storage.get(draftKey)).payload.values.headline, 'Edited after opening');
+  assert.equal(JSON.parse(shared.storage.get(libraryKey))[0].payload.values.headline, 'Edited after opening');
+}
 
 for (const damaged of ['{broken JSON', '{"not":"a list"}', '[{"id":"old","payload":null}]']) {
   const instance = harness({[libraryKey]: damaged});
