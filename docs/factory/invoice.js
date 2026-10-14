@@ -14,7 +14,7 @@
     clientName: 'Jordan Brooks', clientEmail: 'jordan@example.com', organisation: 'Bright Path Community Center',
     project: 'Fall community fundraiser', notes: '50% deposit starts the project. Balance is due when the final files are delivered.',
     quantities: {flyer: 1, extraSize: 1, extraEdit: 0, printReady: 1, rush: 1},
-    payment: {cashApp: '$CultureShyft', zelle: 'mark@cultureshyftmedia.com', paypal: 'https://paypal.me/CultureShyft'}
+    payment: {cashApp: '$YourCashtag', zelle: 'you@example.com', paypal: 'https://paypal.me/YourName'}
   });
   const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const INVOICE_NUMBER = /^CSM-\d{8}-\d{2,12}$/;

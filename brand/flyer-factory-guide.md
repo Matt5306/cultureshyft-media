@@ -20,7 +20,7 @@ The customer chooses a sample, replaces its made-up details, enters their name a
 
 If the email app does not open, use **Copy request** and paste into an email to **mark@cultureshyftmedia.com**. If automatic copying is blocked, select the text and use the phone’s Copy command. Long briefs use the same text fallback. Ask customers to attach photos separately; photos are not included in the link. If a link is missing or damaged, use the readable text to fill the brief manually.
 
-Brief links contain customer details. Send them only to the people working on that order. The order page does not autosave: copy the request before leaving it.
+Brief links keep customer details in the browser-only `#brief=` part of the address, rather than the server-visible query string. Send them only to the people working on that order. The order page does not autosave: copy the request before leaving it.
 
 ## 2. Turn the brief into a flyer
 
@@ -50,7 +50,7 @@ In the factory, choose **Make invoice**. The customer and requested extras come 
 
 The invoice shows a 50% deposit and the remaining 50% due on delivery. Set the due date to the date you agree with the customer. Confirm extras before doing them. A different event, offer or design is another $20 flyer. Custom writing and illustration need a separate quote.
 
-Open invoice **Settings** once on each device. Enter your actual Cash App `$cashtag`, Zelle email/phone and/or PayPal.me link, then save. Check the printed text and payment links before sending. Do not use the sample invoice’s example payment details. These settings stay in this browser; they are not shared across devices.
+Open invoice **Settings** once on each device. Replace the deliberately fake `$YourCashtag`, `you@example.com` and `paypal.me/YourName` placeholders with your actual Cash App cashtag, Zelle email/phone and/or PayPal.me link, then save. Check the printed text and payment links before sending. These settings stay in this browser; they are not shared across devices.
 
 Invoice numbers use `CSM-YYYYMMDD-NN`, with a daily counter on this browser. Use one device/browser for issuing invoices to avoid duplicate numbers across devices. Keep exported invoices as your record. If browser storage fails or is cleared, check your last issued number before making another invoice. The page explains when saving fails.
 

@@ -8,7 +8,7 @@
     try {
       const token = window.factoryShare.encode(payload);
       // A local acceptance run still creates a shareable production link.
-      link = `https://cultureshyftmedia.com/factory/?brief=${token}`;
+      link = `https://cultureshyftmedia.com/factory/#brief=${token}`;
     } catch (error) { reason = error.message; }
     const body = text + (link ? `\n\nOpen this brief in Flyer Factory:\n${link}` : '');
     const mailto = `mailto:mark@cultureshyftmedia.com?subject=${encodeURIComponent('Flyer request — ' + payload.values.headline)}&body=${encodeURIComponent(body)}`;

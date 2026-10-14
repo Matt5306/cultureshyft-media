@@ -38,6 +38,9 @@
     window.factoryRuntimeErrorListeners = true;
   }
   const params = new URLSearchParams(location.search);
+  const fragmentParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const hasSharedBrief = fragmentParams.has('brief') || params.has('brief');
+  const sharedBriefToken = fragmentParams.has('brief') ? fragmentParams.get('brief') : params.get('brief');
   const demo = params.get('demo');
   if (Object.hasOwn(presets, demo)) {
     $('layout').value = demo;
@@ -383,13 +386,13 @@
         $('preset-status').textContent = 'Sample loaded. Replace the example date, place, contact and offer before sharing.';
       }
       $('preset').addEventListener('change', () => usePreset($('preset').value));
-      if (!params.has('brief') && Object.hasOwn(choices, demo)) { $('preset').value = demo; usePreset(demo); }
+      if (!hasSharedBrief && Object.hasOwn(choices, demo)) { $('preset').value = demo; usePreset(demo); }
     } catch (_) {
       $('preset-status').textContent = 'Samples could not load. Your brief is safe. Fill in the details below, or reload to try again.';
     }
-    if (params.has('brief')) {
+    if (hasSharedBrief) {
       try {
-        applyBrief(window.factoryShare.decode(params.get('brief')));
+        applyBrief(window.factoryShare.decode(sharedBriefToken));
         $('preset-status').textContent = 'Customer brief loaded. Check the details, then save to My flyers.';
       } catch (error) { $('preset-status').textContent = `${error.message} Saved flyers are unchanged. Ask for the copied brief text.`; }
     }

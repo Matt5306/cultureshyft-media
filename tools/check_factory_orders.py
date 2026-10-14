@@ -67,17 +67,31 @@ def check_orders(chrome, output_dir):
             page.evaluate("Object.defineProperty(navigator, 'clipboard', {value: {writeText: () => Promise.reject(new Error('blocked'))}, configurable:true})")
             page.locator('#copy-order').click()
             expect(page.locator('#order-status')).to_contain_text('Use Copy')
-            token = parse_qs(urlparse(prepared['link']).query)['brief'][0]
-            page.goto(checks.FACTORY_PAGE.as_uri() + '?brief=' + token + '&check=1'); ready()
+            parsed_link = urlparse(prepared['link'])
+            assert not parsed_link.query, 'Generated customer link must keep the brief out of the server-visible query'
+            token = parse_qs(parsed_link.fragment)['brief'][0]
+            assert payload['values']['clientName'] not in parsed_link.query and payload['values']['clientEmail'] not in parsed_link.query
+            page.goto(checks.FACTORY_PAGE.as_uri() + '?check=1#brief=' + token); ready()
             actual = page.evaluate('window.factoryBrief.collect()')
             assert actual == payload, f'Brief round-trip differs: {actual} != {payload}'
             expect(page.locator('#preset-status')).to_contain_text('Customer brief loaded')
+            legacy_payload = json.loads(json.dumps(payload))
+            legacy_payload['values']['headline'] = 'Legacy query link'
+            legacy_token = page.evaluate('(payload) => factoryShare.encode(payload)', legacy_payload)
+            page.goto(checks.FACTORY_PAGE.as_uri() + '?brief=' + legacy_token + '&check=1'); ready()
+            assert page.evaluate('window.factoryBrief.collect()') == legacy_payload, 'Legacy ?brief= link did not load'
+            page.goto(checks.FACTORY_PAGE.as_uri() + '?brief=' + legacy_token + '&check=1#brief=' + token); ready()
+            page.reload(); ready()
+            assert page.evaluate('window.factoryBrief.collect()') == payload, 'Fragment brief must take precedence over legacy query brief'
             page.locator('#make-invoice').click()
             state = page.evaluate('window.factoryInvoice.getState()')
             assert state['clientName'] == payload['values']['clientName'] and state['clientEmail'] == payload['values']['clientEmail'], state
             assert state['totals'] == {'subtotal':45, 'total':45, 'deposit':22.5, 'balance':22.5}, state
-            print('PASS order: desktop/phone/PDF, readable email, Unicode brief round-trip, oversize/copy fallbacks, invoice from brief')
+            print('PASS order: desktop/phone/PDF, readable email, fragment brief round-trip, legacy query fallback and fragment precedence, oversize/copy fallbacks, invoice from brief')
             page.goto(checks._page_url('invoice')); ready()
+            payment_text = page.locator('#invoice-payment-view').inner_text()
+            assert '$YourCashtag' in payment_text and 'you@example.com' in payment_text and 'paypal.me/YourName' in payment_text, payment_text
+            assert '$CultureShyft' not in payment_text and 'paypal.me/CultureShyft' not in payment_text, payment_text
             for size, suffix in [(checks.DESKTOP_SIZE, 'desktop'), (checks.MOBILE_SIZE, 'mobile')]:
                 page.set_viewport_size({'width':size[0], 'height':size[1]})
                 report = page.evaluate('window.factoryReport()')
@@ -99,7 +113,7 @@ def check_orders(chrome, output_dir):
             receipt.write_bytes(base64.b64decode(png.split(',')[1]))
             checks._check_screenshot(receipt, (1080,1350), 'invoice receipt')
             # Recovery and settings run in this isolated browser profile only.
-            page.goto(checks.FACTORY_PAGE.as_uri() + '?brief=' + token); ready()
+            page.goto(checks.FACTORY_PAGE.as_uri() + '#brief=' + token); ready()
             page.locator('#make-invoice').click()
             page.locator('#invoice-notes').fill('Keep this invoice edit when I return.')
             number = page.locator('#invoice-number').input_value()
@@ -108,14 +122,14 @@ def check_orders(chrome, output_dir):
             expect(page.locator('#invoice-notes')).to_have_value('Keep this invoice edit when I return.')
             expect(page.locator('#invoice-number')).to_have_value(number)
             page.locator('#invoice-settings-open').click()
-            page.locator('#invoice-cashapp').fill('$MarkExample')
+            page.locator('#invoice-cashapp').fill('$YourCashtag')
             page.locator('#invoice-paypal').fill('https://invalid.example/pay')
             page.locator('#invoice-settings-form button[type=submit]').click()
             expect(page.locator('#invoice-settings-status')).to_contain_text('Fix')
-            page.locator('#invoice-paypal').fill('https://paypal.me/MarkExample')
+            page.locator('#invoice-paypal').fill('https://paypal.me/YourName')
             page.locator('#invoice-settings-form button[type=submit]').click()
             expect(page.locator('#invoice-settings')).to_be_hidden()
-            assert 'https://paypal.me/MarkExample' in page.evaluate('factoryInvoice.report().diagnostics.paymentLinks')
+            assert 'https://paypal.me/YourName' in page.evaluate('factoryInvoice.report().diagnostics.paymentLinks')
             draft = page.evaluate("localStorage.getItem('csm.invoice.draft.v1')")
             page.reload(); ready()
             assert page.evaluate("localStorage.getItem('csm.invoice.draft.v1')") == draft, 'Opening factory must not overwrite invoice draft'

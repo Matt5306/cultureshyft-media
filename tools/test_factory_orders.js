@@ -24,6 +24,10 @@ for (const [id, preset] of Object.entries(presets)) {
   assert.deepEqual(JSON.parse(JSON.stringify(share.decode(token))), payload, id + ' exact Unicode round-trip');
   const prepared = order.prepare(payload);
   assert.equal(prepared.reason, '', id);
+  const link = new URL(prepared.link);
+  assert.equal(link.search, '', id + ' customer brief stays out of the URL query');
+  assert.ok(link.hash.startsWith('#brief='), id + ' customer brief uses the browser-only fragment');
+  assert.equal(link.hash.slice('#brief='.length), token, id + ' exact fragment token');
   const mail = new URL(prepared.mailto);
   assert.equal(mail.pathname, 'mark@cultureshyftmedia.com');
   assert.ok(mail.searchParams.get('body').includes(prepared.link));
