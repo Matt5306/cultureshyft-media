@@ -21,6 +21,7 @@
       body: read('body'),
       cta: read('cta'),
       contact: read('contact') || 'Your contact line goes here',
+      qrUrl: read('qr-url'),
       accent: $('accent')?.checked !== false
     };
   }
@@ -30,6 +31,8 @@
   }
 
   function focusValue(axis) {
+    const shared = globalThis.factoryPhoto?.getState?.();
+    if (shared && Number.isFinite(Number(shared[axis === 'x' ? 'focusX' : 'focusY']))) return clamp(Number(shared[axis === 'x' ? 'focusX' : 'focusY']), 0, 1);
     const candidates = [`crop-${axis}`, `photo-focus-${axis}`, `focus-${axis}`];
     for (const id of candidates) {
       const control = $(id);
@@ -65,12 +68,13 @@
     ctx.closePath();
   }
 
-  function drawCover(ctx, image, box, focusX, focusY) {
-    const scale = Math.max(box.width / image.naturalWidth, box.height / image.naturalHeight);
+  function drawCover(ctx, image, box, focusX, focusY, zoom = 1) {
+    zoom = clamp(Number(zoom) || 1, 1, 2.5);
+    const scale = Math.max(box.width / image.naturalWidth, box.height / image.naturalHeight) * zoom;
     const sourceWidth = box.width / scale;
     const sourceHeight = box.height / scale;
-    const sourceX = clamp(image.naturalWidth * focusX - sourceWidth / 2, 0, image.naturalWidth - sourceWidth);
-    const sourceY = clamp(image.naturalHeight * focusY - sourceHeight / 2, 0, image.naturalHeight - sourceHeight);
+    const sourceX = (image.naturalWidth - sourceWidth) * focusX;
+    const sourceY = (image.naturalHeight - sourceHeight) * focusY;
     ctx.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, box.x, box.y, box.width, box.height);
     return {sourceX, sourceY, sourceWidth, sourceHeight, focusX, focusY};
   }
@@ -81,7 +85,9 @@
     ctx.clip();
     let crop = null;
     if (image) {
-      crop = drawCover(ctx, image, box, focusValue('x'), focusValue('y'));
+      const zoom = clamp(Number(globalThis.factoryPhoto?.getState?.().zoom) || 1, 1, 2.5);
+      crop = drawCover(ctx, image, box, focusValue('x'), focusValue('y'), zoom);
+      crop.zoom = zoom;
     } else {
       ctx.fillStyle = COLORS.sand;
       ctx.fillRect(box.x, box.y, box.width, box.height);
@@ -278,9 +284,11 @@
       ctx.fill();
       fits.cta = drawFittedText(ctx, data.cta, {x: 88, y: 1492, width: 556, height: 48}, {maxSize: 31, minSize: 20, weight: 800, lineHeight: 1.1, maxLines: 1, color: COLORS.ink, align: 'center'});
     }
+    let qrBox = null;
+    if (data.qrUrl) qrBox = window.factoryQR.draw(ctx, data.qrUrl, 864, 1440, 140);
     fits.contact = drawFittedText(ctx, data.contact, {x: 60, y: 1602, width: 540, height: 44}, {maxSize: 22, minSize: 16, weight: 700, lineHeight: 1.2, maxLines: 2, color: COLORS.paper});
     const logoBox = drawLogo(ctx, logo, 710, 1592, 310);
-    return {fits, logoBox, crop, photoUsed: Boolean(image && data.layout !== 'announcement'), safeArea};
+    return {fits, logoBox, qrBox, crop, photoUsed: Boolean(image && data.layout !== 'announcement'), safeArea};
   }
 
   function drawFacebook(ctx, data, logo, image) {
@@ -325,7 +333,7 @@
 
   async function renderCanvas(mode) {
     if (!Object.hasOwn(MODES, mode)) throw new Error(`Unknown social size: ${mode}`);
-    if (window.factoryReady) await window.factoryReady;
+    if (window.factoryPageReady) await window.factoryPageReady;
     const loadedFonts = await document.fonts.load('800 72px Manrope');
     await document.fonts.ready;
     if (!loadedFonts.length || !document.fonts.check('800 72px Manrope')) throw new Error('The brand font did not load. Your brief is unchanged; try the download again.');
@@ -342,7 +350,7 @@
     if (mode === 'square') report = drawSquare(ctx, data, logo, image);
     else if (mode === 'story') report = drawStory(ctx, data, logo, image);
     else report = drawFacebook(ctx, data, logo, image);
-    diagnostics[mode] = {width: config.width, height: config.height, layout: data.layout, ...report};
+    diagnostics[mode] = {width: config.width, height: config.height, layout: data.layout, ...report, qrError: window.factoryQR?.getLastError?.() || ''};
     return canvas;
   }
 
@@ -356,8 +364,19 @@
     });
   }
 
+  async function createSocialReport(pageReady, renderSocial, getDiagnostics) {
+    try {
+      if (pageReady) await pageReady;
+      const images = {};
+      for (const mode of Object.keys(MODES)) images[mode] = await renderSocial(mode);
+      return {ready: true, images, diagnostics: getDiagnostics()};
+    } catch (error) {
+      return {ready: false, error: error instanceof Error ? error.message : String(error), diagnostics: getDiagnostics()};
+    }
+  }
+
   if (typeof window === 'undefined' || typeof document === 'undefined') {
-    if (typeof module === 'object' && module.exports) module.exports = {wrapLines, fitCanvasText, drawCover, canvasBlob};
+    if (typeof module === 'object' && module.exports) module.exports = {wrapLines, fitCanvasText, drawCover, canvasBlob, createSocialReport};
     return;
   }
 
@@ -399,25 +418,32 @@
     button.addEventListener('click', () => download(button.dataset.socialExport, button));
   });
 
-  async function publishSocialReport() {
+  async function runSocialExport() {
     const params = new URLSearchParams(location.search);
-    if (params.get('check') !== '1' || params.get('social') !== '1') return;
+    if (params.get('check') !== '1' || params.get('social') !== '1') {
+      if (window.factoryPageReady) await window.factoryPageReady;
+      return window.factoryReport?.();
+    }
+    const report = await createSocialReport(
+      window.factoryPageReady,
+      window.factoryRenderSocial,
+      window.factorySocialDiagnostics
+    );
     let output = $('factory-social-report');
     if (!output) {
       output = document.createElement('script');
       output.id = 'factory-social-report';
       output.type = 'application/json';
-      document.body.append(output);
     }
-    try {
-      if (window.factoryReady) await window.factoryReady;
-      const images = {};
-      for (const mode of Object.keys(MODES)) images[mode] = await window.factoryRenderSocial(mode);
-      output.textContent = JSON.stringify({ready: true, images, diagnostics: window.factorySocialDiagnostics()});
-    } catch (error) {
-      output.textContent = JSON.stringify({ready: false, error: error instanceof Error ? error.message : String(error), diagnostics: window.factorySocialDiagnostics()});
-    }
+    // Chrome's DOM dump can observe an appended node before asynchronous PNG
+    // rendering finishes. Populate it while detached so every visible marker
+    // is valid JSON rather than an empty, intermittently unparsable report.
+    output.textContent = JSON.stringify(report);
+    if (!output.isConnected) document.body.append(output);
+    return report;
   }
 
-  publishSocialReport();
+  // The public readiness contract includes every check-mode export and only
+  // resolves after the complete social report is present in the DOM.
+  window.factoryReady = runSocialExport();
 })();

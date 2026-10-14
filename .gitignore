@@ -3,4 +3,5 @@
 *.env
 # render scratch
 tools/html/
+_archive/
 __pycache__/

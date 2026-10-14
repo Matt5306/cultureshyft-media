@@ -2,10 +2,11 @@
 """Acceptance checks for the browser-only CultureShyft Flyer Factory.
 
 The checker deliberately uses the same Chrome command-line paths a person uses:
-screen rendering and printing.  The page publishes the result of calling
-``window.factoryReport()`` in ``script#factory-check-report`` when ``check=1``
-is present.  Reading that marker from ``--dump-dom`` lets this script verify the
-post-layout browser state without a web server or a browser automation package.
+screen rendering and printing. The page publishes its check and social reports
+as JSON script nodes when ``check=1`` is present. Installed Playwright polls
+those nodes before reading the rendered DOM and sets a real 390px phone viewport
+(Windows Chrome otherwise clamps command-line windows to 500px). No browser
+download or server is used.
 
 Run from anywhere::
 
@@ -14,7 +15,8 @@ Run from anywhere::
     python tools/check_factory.py --social
 
 ``--keep`` preserves the generated PNG and PDF evidence in
-``tools/html/factory``.  Otherwise all artifacts live in a temporary directory.
+``tools/html/factory``.  Otherwise evidence and isolated browser profiles remain in the ignored
+``tools/html/factory-tmp`` scratch folder for diagnosis (never auto-deleted).
 """
 
 from __future__ import annotations
@@ -30,9 +32,9 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
+import uuid
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -59,9 +61,9 @@ FACTORY_PAGE = ROOT / "docs" / "factory" / "index.html"
 DEFAULT_CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
 KEEP_DIR = ROOT / "tools" / "html" / "factory"
 SCRATCH_DIR = ROOT / "tools" / "html" / "factory-tmp"
-DEMOS = ("poster", "event", "announcement")
+DEMOS = ("poster", "event", "announcement", "event-qr")
 DESKTOP_SIZE = (1440, 1200)
-MOBILE_SIZE = (500, 1200)  # headless Chrome on Windows will not go narrower than 500px
+MOBILE_SIZE = (390, 844)
 LETTER_POINTS = (612.0, 792.0)
 SOCIAL_SIZES = {"square": (1080, 1080), "story": (1080, 1920), "facebook": (1920, 1005)}
 SOCIAL_REPORT_RE = re.compile(
@@ -89,17 +91,23 @@ class CheckFailure(RuntimeError):
     """An acceptance condition failed with a user-actionable explanation."""
 
 
-class _ResilientTemporaryDirectory(tempfile.TemporaryDirectory[str]):
-    """Keep a primary check failure visible if Windows denies temp cleanup."""
+class _ResilientTemporaryDirectory:
+    """Use inherited workspace permissions; retain scratch evidence for recovery.
 
-    def __exit__(self, exc: object, value: object, traceback: object) -> None:
-        try:
-            super().__exit__(exc, value, traceback)
-        except OSError as cleanup_error:
-            print(
-                f"WARNING: temporary evidence could not be cleaned up: {cleanup_error}",
-                file=sys.stderr,
-            )
+    Python 3.13's private temporary-directory ACL can deny a child Chrome
+    process access on Windows. An ordinary uniquely named workspace directory
+    avoids that startup failure. No source or user data is removed.
+    """
+
+    def __init__(self, *, prefix: str, dir: Path, **_: object) -> None:
+        self.path = Path(dir) / f"{prefix}{uuid.uuid4().hex}"
+        self.path.mkdir(parents=True)
+
+    def __enter__(self) -> str:
+        return str(self.path)
+
+    def __exit__(self, *_: object) -> None:
+        pass
 
 
 @dataclass(frozen=True)
@@ -130,7 +138,7 @@ def _run_chrome(chrome: Path, profile: Path, args: list[str], label: str) -> Chr
         "--allow-file-access-from-files",
         "--force-device-scale-factor=1",
         "--run-all-compositor-stages-before-draw",
-        "--virtual-time-budget=8000",
+        "--virtual-time-budget=15000",
         f"--user-data-dir={profile}",
         *args,
     ]
@@ -160,17 +168,40 @@ def _run_chrome(chrome: Path, profile: Path, args: list[str], label: str) -> Chr
 
 
 def _page_url(demo: str, social: bool = False) -> str:
-    query = {"demo": demo, "check": "1"}
+    query = {"demo": "event" if demo == "event-qr" else demo, "check": "1"}
+    if demo == "event-qr":
+        query["qr"] = "1"
     if social:
         query["social"] = "1"
     return f"{FACTORY_PAGE.as_uri()}?{urlencode(query)}"
+
+
+def _runtime_errors_from_dom(dumped_dom: str) -> list[str]:
+    """Recover the page's own JavaScript diagnostics from a partial result."""
+    matches = REPORT_RE.findall(dumped_dom)
+    if not matches:
+        return []
+    try:
+        report = json.loads(html.unescape(matches[-1]).strip())
+        errors = report.get("diagnostics", {}).get("runtimeErrors", [])
+        return [str(error) for error in errors] if isinstance(errors, list) else []
+    except (AttributeError, json.JSONDecodeError, TypeError):
+        return []
+
+
+def _with_runtime_errors(message: str, dumped_dom: str) -> str:
+    errors = _runtime_errors_from_dom(dumped_dom)
+    return message + ("\nPage runtimeErrors:\n" + json.dumps(errors, indent=2, ensure_ascii=False) if errors else "\nPage runtimeErrors: []")
 
 
 def _check_social(dumped_dom: str, output_dir: Path, demo: str) -> None:
     """Decode actual canvas output, independently checking PNG dimensions and pixels."""
     matches = SOCIAL_REPORT_RE.findall(dumped_dom)
     if not matches:
-        raise CheckFailure(f"{demo} social: no factory-social-report; export checks did not finish")
+        raise CheckFailure(_with_runtime_errors(
+            f"{demo} social: no factory-social-report; export checks did not finish",
+            dumped_dom,
+        ))
     try:
         report = json.loads(matches[-1])
         if not isinstance(report, dict) or report.get("ready") is not True:
@@ -192,7 +223,10 @@ def _check_social(dumped_dom: str, output_dir: Path, demo: str) -> None:
             path = output_dir / f"{demo}-{kind}.png"
             path.write_bytes(data)
             _check_screenshot(path, size, label)
-            _check_social_layout(report.get("diagnostics", {}).get(kind), size, kind, label)
+            layout = report.get("diagnostics", {}).get(kind)
+            _check_social_layout(layout, size, kind, label)
+            if demo == "event-qr" and kind == "story" and not layout.get("qrBox"):
+                raise CheckFailure(f"{label}: QR demo story did not render its QR code")
     except CheckFailure:
         raise
     except Exception as exc:
@@ -233,14 +267,26 @@ def _check_social_layout(layout: Any, size: tuple[int, int], kind: str, label: s
         if fit["maxLineWidth"] > fit["box"]["width"] + 0.5:
             raise CheckFailure(f"{label}: {name} text exceeds its width")
     check_box(layout.get("logoBox"), "logo")
+    if layout.get("qrBox"):
+        qr = layout["qrBox"]
+        check_box(qr, "QR code")
+        boxes = {name: fit["box"] for name, fit in fits.items()}
+        boxes["logo"] = layout["logoBox"]
+        for name, box in boxes.items():
+            if (min(qr["x"] + qr["width"], box["x"] + box["width"]) > max(qr["x"], box["x"])
+                    and min(qr["y"] + qr["height"], box["y"] + box["height"]) > max(qr["y"], box["y"])):
+                raise CheckFailure(f"{label}: QR code overlaps {name}")
 
 
 def _extract_report(dumped_dom: str, label: str) -> dict[str, Any]:
     matches = REPORT_RE.findall(dumped_dom)
     if not matches:
         raise CheckFailure(
-            f"{label}: no #factory-check-report marker was found. "
-            "The page may not have finished window.factoryReady or check mode may be broken."
+            _with_runtime_errors(
+                f"{label}: no #factory-check-report marker was found. "
+                "Check mode did not initialize.",
+                dumped_dom,
+            )
         )
     raw = html.unescape(matches[-1]).strip()
     try:
@@ -288,7 +334,7 @@ def _check_report_details(
     report: dict[str, Any], demo: str, label: str, expected_width: int
 ) -> None:
     diagnostics = _diagnostics(report, label)
-    if diagnostics.get("layout") != demo:
+    if diagnostics.get("layout") != ("event" if demo == "event-qr" else demo):
         raise CheckFailure(
             f"{label}: expected layout {demo!r}, got {diagnostics.get('layout')!r}"
         )
@@ -296,6 +342,9 @@ def _check_report_details(
         raise CheckFailure(f"{label}: rendered flyer logo was not found")
     if diagnostics.get("contactPresent") is not True:
         raise CheckFailure(f"{label}: rendered flyer contact line was not found")
+
+    if demo == "event-qr" and diagnostics.get("qrPresent") is not True:
+        raise CheckFailure(f"{label}: QR demo did not render its QR code")
 
     viewport_width = _number(diagnostics, "viewportWidth", label)
     client_width = _number(diagnostics, "documentClientWidth", label)
@@ -383,7 +432,7 @@ def _archive_kept_artifacts() -> None:
     if not old:
         return
     stamp = datetime.now().strftime("%H%M%S-%f")
-    archive = ROOT / "_archive" / date.today().isoformat() / "tools" / "html" / "factory" / stamp
+    archive = ROOT / "_archive" / "2026-10-11" / "tools" / "html" / "factory" / stamp
     archive.mkdir(parents=True, exist_ok=True)
     for path in old:
         shutil.move(str(path), str(archive / path.name))
@@ -400,35 +449,89 @@ def _render_dom_and_png(
 ) -> dict[str, Any]:
     label = f"{demo} {suffix}"
     screenshot = output_dir / f"{demo}-{suffix}.png"
-    result = _run_chrome(
-        chrome,
-        profile,
-        [
-            f"--window-size={size[0]},{size[1]}",
-            "--dump-dom",
-            f"--screenshot={screenshot}",
-            _page_url(demo, social=suffix == "desktop"),
-        ],
-        label,
-    )
-    report = _extract_report(result.stdout, label)
+    try:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise CheckFailure(
+            f"{label}: deterministic report polling requires the installed Python playwright package"
+        ) from exc
+
+    dumped_dom = ""
+    runtime_errors: list[str] = []
+    external: list[str] = []
+    try:
+        with sync_playwright() as pw:
+            context = pw.chromium.launch_persistent_context(
+                str(profile),
+                executable_path=str(chrome),
+                headless=True,
+                viewport={"width": size[0], "height": size[1]},
+                device_scale_factor=1,
+                args=[
+                    "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-breakpad",
+                    "--disable-crash-reporter",
+                    "--hide-scrollbars",
+                    "--disable-background-networking",
+                    "--disable-component-update",
+                    "--disable-default-apps",
+                    "--disable-extensions",
+                    "--no-first-run",
+                    "--allow-file-access-from-files",
+                    "--force-device-scale-factor=1",
+                    "--run-all-compositor-stages-before-draw",
+                    f"--window-size={size[0]},{size[1]}",
+                ],
+            )
+            try:
+                def route_request(route: Any) -> None:
+                    if route.request.url.startswith(("http:", "https:")):
+                        external.append(route.request.url)
+                        route.abort()
+                    else:
+                        route.continue_()
+
+                context.route("**/*", route_request)
+                page = context.pages[0] if context.pages else context.new_page()
+                page.goto(_page_url(demo, social=suffix == "desktop"), wait_until="load")
+                try:
+                    page.wait_for_function(
+                        """requiresSocial => {
+                          const check = document.getElementById('factory-check-report');
+                          const social = document.getElementById('factory-social-report');
+                          if (!check || (requiresSocial && !social)) return false;
+                          try { return JSON.parse(check.textContent).ready === true; }
+                          catch (_) { return false; }
+                        }""",
+                        arg=suffix == "desktop",
+                        timeout=15000,
+                        polling=50,
+                    )
+                except PlaywrightTimeoutError as exc:
+                    runtime_errors = page.evaluate("() => [...(window.factoryRuntimeErrors || [])]")
+                    raise CheckFailure(
+                        f"{label}: timed out polling deterministic report nodes\n"
+                        f"Page runtimeErrors:\n{json.dumps(runtime_errors, indent=2, ensure_ascii=False)}"
+                    ) from exc
+                page.screenshot(path=str(screenshot))
+                dumped_dom = page.content()
+            finally:
+                context.close()
+    except CheckFailure:
+        raise
+    except Exception as exc:
+        raise CheckFailure(f"{label}: browser report polling failed: {exc}") from exc
+
+    if external:
+        raise CheckFailure(f"{label}: unexpected network requests: {external}")
+    report = _extract_report(dumped_dom, label)
     _check_report_details(report, demo, label, size[0])
     _check_screenshot(screenshot, size, label)
     if suffix == "desktop":
-        _check_social(result.stdout, output_dir, demo)
+        _check_social(dumped_dom, output_dir, demo)
     return report
-
-
-def _render_dom_and_png_with_retry(chrome, profile, output_dir, demo, size, suffix, attempts: int = 3):
-    """Headless Chrome occasionally dumps the DOM before fonts settle (ready=false); retry that one race."""
-    for attempt in range(1, attempts + 1):
-        try:
-            return _render_dom_and_png(chrome, profile, output_dir, demo, size, suffix)
-        except CheckFailure as exc:
-            transient = ("ready=true" in str(exc)) or ("invalid export report" in str(exc)) or ("no factory-social-report" in str(exc))
-            if not transient or attempt == attempts:
-                raise
-            print(f"RETRY {demo} {suffix}: transient render race on attempt {attempt} ({str(exc)[:60]}); rendering again")
 
 
 def _render_pdf(chrome: Path, profile: Path, output_dir: Path, demo: str) -> None:
@@ -504,24 +607,20 @@ def main(argv: list[str] | None = None) -> int:
         ) as profile_name:
             profile = Path(profile_name)
             for demo in DEMOS:
-                _render_dom_and_png_with_retry(
-                    chrome, profile, output_dir, demo, DESKTOP_SIZE, "desktop"
-                )
+                _render_dom_and_png(chrome, profile, output_dir, demo, DESKTOP_SIZE, "desktop")
                 print(f"PASS {demo}: desktop report and square 1080x1080, story 1080x1920, Facebook 1920x1005 PNGs")
                 if not args.social:
                     _render_pdf(chrome, profile, output_dir, demo)
                     print(f"PASS {demo}: nonblank PNG, 1-page Letter PDF")
 
-            for demo in (() if args.social else DEMOS):
-                _render_dom_and_png_with_retry(
-                    chrome, profile, output_dir, demo, MOBILE_SIZE, "mobile"
-                )
-                print(f"PASS {demo}: 500px mobile (narrowest headless Chrome allows), no horizontal scroll")
+            if not args.social:
+                from check_factory_browser import check_browser
+                check_browser(chrome, output_dir)
 
         if args.keep:
             print(f"Evidence kept in {output_dir}")
     checks = "desktop and social" if args.social else "desktop, print, mobile, and social"
-    print(f"PASS Flyer Factory: all 3 layouts passed {checks} checks")
+    print(f"PASS Flyer Factory: all 3 layouts and the QR demo passed {checks} checks")
     return 0
 
 

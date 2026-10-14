@@ -11,17 +11,65 @@
     announcement: {headline: 'Something\ngood starts\nhere.', subheadline: 'Your next chapter deserves to be seen.', date: 'Opening Monday\nNovember 2 · 9 AM', place: '24 Grand River Ave\nDetroit, MI', body: 'A new space for ideas, people and possibility.\nStop by, say hello and see what is next.\nMade for this community.', cta: 'Be part of the beginning.', contact: 'hello@example.com · 313-555-0142'}
   };
   let ready = false;
-  let photoURL = null;
   let uploadVersion = 0;
   let fontFailed = false;
   let shortened = [];
+  let qrInvalid = '';
   let renderQueued = false;
-  const runtimeErrors = [];
+  const runtimeErrors = window.factoryRuntimeErrors = window.factoryRuntimeErrors || [];
+  const bootstrapRecordRuntimeError = window.factoryRecordRuntimeError;
+  function recordRuntimeError(error) {
+    if (bootstrapRecordRuntimeError) bootstrapRecordRuntimeError(error);
+    else {
+      const detail = error instanceof Error ? (error.stack || error.message) : String(error || 'Unknown JavaScript error');
+      if (!runtimeErrors.includes(detail)) runtimeErrors.push(detail);
+    }
+    publishReport();
+  }
+  window.factoryRecordRuntimeError = recordRuntimeError;
+  if (!window.factoryRuntimeErrorListeners) {
+    window.addEventListener('error', event => {
+      const source = event.filename || event.target?.src || event.target?.href || '';
+      recordRuntimeError(`${event.message || 'Resource load failed'}${source ? ` (${source})` : ''}`);
+    }, true);
+    window.addEventListener('unhandledrejection', event => {
+      recordRuntimeError(`Unhandled rejection: ${event.reason instanceof Error ? (event.reason.stack || event.reason.message) : String(event.reason)}`);
+    });
+    window.factoryRuntimeErrorListeners = true;
+  }
   const params = new URLSearchParams(location.search);
   const demo = params.get('demo');
   if (Object.hasOwn(presets, demo)) {
     $('layout').value = demo;
     fields.forEach(key => { $(key).value = key === 'body' ? presets[demo][key] : presets[demo][key].replace(/\n/g, ' '); });
+  }
+  if (params.get('qr') === '1') $('qr-url').value = 'https://cultureshyftmedia.com/';
+
+  function collectBrief() {
+    const values = {};
+    [...form.elements].forEach(control => {
+      if (!control.name || control.type === 'file') return;
+      values[control.name] = control.type === 'checkbox' ? control.checked : control.value;
+    });
+    return {version: 1, values, photo: window.factoryPhoto.getState()};
+  }
+
+  function applyBrief(payload) {
+    if (!payload || payload.version !== 1 || !payload.values || typeof payload.values !== 'object') throw new Error('This is not a Flyer Factory brief.');
+    uploadVersion++;
+    [...form.elements].forEach(control => {
+      if (!control.name) return;
+      const supplied = Object.hasOwn(payload.values, control.name);
+      if (control.type === 'checkbox') control.checked = supplied ? Boolean(payload.values[control.name]) : control.name === 'accent';
+      else if (control.type !== 'file') {
+        const value = supplied ? String(payload.values[control.name] ?? '') : control.name === 'layout' ? 'poster' : '';
+        control.value = Number(control.maxLength) > 0 ? value.slice(0, control.maxLength) : value;
+      }
+    });
+    if (!layouts.includes($('layout').value)) $('layout').value = 'poster';
+    window.factoryPhoto.setState(payload.photo || {});
+    render();
+    form.dispatchEvent(new CustomEvent('factory:briefapplied', {bubbles: true}));
   }
 
   function fits(element) {
@@ -71,6 +119,8 @@
     const missing = fields.filter(key => ['headline', 'contact'].includes(key) && !$(key).value.trim());
     if (fontFailed) {
       $('next-step').textContent = 'The brand font could not load. Your brief is still here. Reload this page to try again before saving.';
+    } else if (qrInvalid) {
+      $('next-step').textContent = `Fix the QR code link: ${qrInvalid}`;
     } else if (missing.length) {
       $('next-step').textContent = `Next: add your ${missing.join(' and ')}${missing.includes('contact') ? ' line' : ''}.`;
     } else if (shortened.length) {
@@ -85,9 +135,22 @@
     renderQueued = false;
     const layout = layouts.includes($('layout').value) ? $('layout').value : 'poster';
     flyer.dataset.layout = layout;
+    positionPhoto();
     flyer.classList.toggle('no-accent', !$('accent').checked);
     const logoPath = `../logo/web/cultureshyft-horizontal-${$('accent').checked ? 'color-onlight' : 'mono-black'}.png`;
     if ($('flyer-logo').getAttribute('src') !== logoPath) $('flyer-logo').src = logoPath;
+    const qrValue = $('qr-url').value.trim();
+    qrInvalid = '';
+    try {
+      window.factoryQR.renderElement($('flyer-qr'), qrValue);
+      $('qr-url').setCustomValidity('');
+      $('qr-help').textContent = 'Add a full web link to place a scannable code on the flyer and story.';
+    } catch (error) {
+      $('flyer-qr').hidden = true;
+      qrInvalid = error instanceof Error ? error.message : 'Use a full http or https link.';
+      $('qr-url').setCustomValidity(qrInvalid);
+      $('qr-help').textContent = qrInvalid;
+    }
     shortened = [];
     const minimums = {headline: 26, subheadline: 16, date: 18, place: 16, cta: 18, contact: 12};
     fields.forEach(key => {
@@ -131,7 +194,7 @@
       if (!visible(element) || element.closest('.photo-art')) return;
       const name = element.id || element.className || element.tagName.toLowerCase();
       if (element.matches('[data-fit]') && !fits(element)) overflow.push(`${name}: text exceeds box`);
-      if (!within(element.getBoundingClientRect(), element.parentElement.getBoundingClientRect())) overflow.push(`${name}: outside parent`);
+      if (element.id !== 'flyer-photo' && !within(element.getBoundingClientRect(), element.parentElement.getBoundingClientRect())) overflow.push(`${name}: outside parent`);
     });
     // Positioned panels must also remain separate; clipping is not proof of fit.
     const panels = [...flyer.children].filter(visible);
@@ -146,7 +209,11 @@
     const logoPresent = logo.complete && logo.naturalWidth > 0 && visible(logo);
     const contactPresent = Boolean($('contact').value.trim()) && Boolean($('flyer-contact').textContent.trim()) && visible($('flyer-contact'));
     if (!logoPresent) missing.push('logo');
-    if (photoURL && flyer.dataset.layout !== 'announcement' && (!$('flyer-photo').complete || !$('flyer-photo').naturalWidth)) missing.push('photo');
+    const photoState = window.factoryPhoto.getState();
+    if (photoState.dataUrl && flyer.dataset.layout !== 'announcement' && (!$('flyer-photo').complete || !$('flyer-photo').naturalWidth)) missing.push('photo');
+    const qrExpected = Boolean($('qr-url').value.trim());
+    const qrPresent = qrExpected && !$('flyer-qr').hidden && Boolean($('flyer-qr').querySelector('svg'));
+    if (qrExpected && !qrPresent) missing.push('QR code');
     if (!contactPresent) missing.push('contact');
     if (!$('headline').value.trim()) missing.push('headline');
     if (fontFailed || !document.fonts.check('800 32px Manrope')) missing.push('Manrope font');
@@ -155,7 +222,7 @@
     const documentScrollWidth = document.documentElement.scrollWidth;
     const documentClientWidth = document.documentElement.clientWidth;
     if (!matchMedia('print').matches && documentScrollWidth > documentClientWidth + 1) overflow.push('page: horizontal scroll');
-    return {overflow, missing, ready, diagnostics: {documentScrollWidth, documentClientWidth, viewportWidth: innerWidth, layout: flyer.dataset.layout, logoPresent, contactPresent, shortened: [...shortened], flyerWidth: flyer.offsetWidth, flyerHeight: flyer.offsetHeight}};
+    return {overflow, missing, ready, diagnostics: {documentScrollWidth, documentClientWidth, viewportWidth: innerWidth, layout: flyer.dataset.layout, logoPresent, contactPresent, qrExpected, qrPresent, qrError: window.factoryQR?.getLastError?.() || qrInvalid || '', runtimeErrors: [...runtimeErrors], shortened: [...shortened], flyerWidth: flyer.offsetWidth, flyerHeight: flyer.offsetHeight}};
   };
 
   function publishReport() {
@@ -183,8 +250,6 @@
   new ResizeObserver(scalePreview).observe($('preview-well'));
   window.addEventListener('beforeprint', render);
   window.addEventListener('afterprint', scalePreview);
-  window.addEventListener('error', event => { runtimeErrors.push(`script: ${event.message || 'load failed'}`); publishReport(); });
-
   $('print-button').addEventListener('click', async () => {
     await window.factoryReady;
     render();
@@ -192,7 +257,7 @@
     // The monochrome logo may have just switched; wait for it before printing.
     try {
       await $('flyer-logo').decode();
-      if (photoURL) await $('flyer-photo').decode();
+      if (window.factoryPhoto.getState().dataUrl) await $('flyer-photo').decode();
     } catch (_) { /* Report below gives recovery guidance. */ }
     const report = window.factoryReport();
     if (report.overflow.length || report.missing.length) {
@@ -201,6 +266,43 @@
     }
     window.print();
   });
+
+  function updatePhotoVisual() {
+    const state = window.factoryPhoto.getState();
+    const image = $('flyer-photo');
+    if (state.dataUrl) {
+      if (image.src !== state.dataUrl) image.src = state.dataUrl;
+      image.hidden = false;
+      $('photo-area').classList.add('has-photo');
+      $('photo-area').classList.toggle('can-drag', flyer.dataset.layout !== 'announcement');
+      $('remove-photo').disabled = false;
+      $('photo-controls').hidden = false;
+      $('photo-zoom').value = String(Math.round(state.zoom * 100));
+      $('photo-zoom-value').value = `${Math.round(state.zoom * 100)}%`;
+    } else {
+      image.hidden = true;
+      image.removeAttribute('src');
+      image.style.removeProperty('transform');
+      $('photo-area').classList.remove('has-photo', 'can-drag');
+      $('remove-photo').disabled = true;
+      $('photo-controls').hidden = true;
+    }
+    queueRender();
+  }
+
+  function positionPhoto() {
+    const state = window.factoryPhoto.getState();
+    const image = $('flyer-photo');
+    const area = $('photo-area');
+    if (!state.dataUrl || !image.naturalWidth || !image.naturalHeight || flyer.dataset.layout === 'announcement') return;
+    const width = area.clientWidth; const height = area.clientHeight;
+    const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight) * state.zoom;
+    const renderedWidth = image.naturalWidth * scale; const renderedHeight = image.naturalHeight * scale;
+    image.style.width = `${renderedWidth}px`; image.style.height = `${renderedHeight}px`;
+    image.style.left = `${-(renderedWidth - width) * state.focusX}px`;
+    image.style.top = `${-(renderedHeight - height) * state.focusY}px`;
+  }
+  $('flyer-photo').addEventListener('load', () => { positionPhoto(); publishReport(); });
 
   $('photo').addEventListener('change', async () => {
     const file = $('photo').files[0];
@@ -215,41 +317,58 @@
       fail('That photo has an unsupported format or is too large.');
       return;
     }
-    const candidateURL = URL.createObjectURL(file);
     try {
-      const candidate = new Image();
-      candidate.src = candidateURL;
-      await candidate.decode();
-      if (version !== uploadVersion) { URL.revokeObjectURL(candidateURL); return; }
-      if (candidate.naturalWidth * candidate.naturalHeight > 30000000) throw new Error('dimensions');
-      const previousURL = photoURL;
-      $('flyer-photo').src = candidateURL;
-      photoURL = candidateURL;
-      $('flyer-photo').hidden = false;
-      $('photo-area').classList.add('has-photo');
-      $('remove-photo').disabled = false;
-      if (previousURL) URL.revokeObjectURL(previousURL);
-      $('photo-status').textContent = 'Photo ready. Use Poster or Event to show it; switch layouts without losing it.';
-    } catch (_) {
-      URL.revokeObjectURL(candidateURL);
-      if (photoURL) $('flyer-photo').src = photoURL;
-      fail('This photo could not open or is over 30 megapixels.');
+      const prepared = await window.factoryPhoto.fromFile(file);
+      if (version !== uploadVersion) return;
+      window.factoryPhoto.setState(prepared);
+      $('photo-status').textContent = 'Photo ready. Drag it in the preview or use zoom; the crop is saved with your brief.';
+    } catch (error) {
+      fail(error instanceof Error ? error.message : 'This photo could not open.');
     }
   });
   $('remove-photo').addEventListener('click', () => {
     uploadVersion++;
-    $('flyer-photo').hidden = true;
-    $('flyer-photo').removeAttribute('src');
-    $('photo-area').classList.remove('has-photo');
-    if (photoURL) URL.revokeObjectURL(photoURL);
-    photoURL = null;
+    window.factoryPhoto.clear();
     $('photo').value = '';
-    $('remove-photo').disabled = true;
     $('photo-status').textContent = 'Photo removed. You can choose another; your brief is unchanged.';
   });
 
+  $('photo-zoom').addEventListener('input', () => {
+    const state = window.factoryPhoto.getState();
+    window.factoryPhoto.setState({...state, zoom: Number($('photo-zoom').value) / 100});
+  });
+  let drag = null;
+  $('photo-area').addEventListener('pointerdown', event => {
+    if (!window.factoryPhoto.getState().dataUrl || flyer.dataset.layout === 'announcement') return;
+    drag = {id: event.pointerId, x: event.clientX, y: event.clientY};
+    $('photo-area').setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  $('photo-area').addEventListener('pointermove', event => {
+    if (!drag || drag.id !== event.pointerId) return;
+    const rect = $('photo-area').getBoundingClientRect();
+    const state = window.factoryPhoto.getState();
+    const imageRect = $('flyer-photo').getBoundingClientRect();
+    const overflowX = Math.max(1, imageRect.width - rect.width);
+    const overflowY = Math.max(1, imageRect.height - rect.height);
+    window.factoryPhoto.setState({...state, focusX: state.focusX - (event.clientX - drag.x) / overflowX, focusY: state.focusY - (event.clientY - drag.y) / overflowY});
+    drag.x = event.clientX; drag.y = event.clientY;
+  });
+  const endDrag = event => { if (drag?.id === event.pointerId) drag = null; };
+  $('photo-area').addEventListener('pointerup', endDrag);
+  $('photo-area').addEventListener('pointercancel', endDrag);
+  window.addEventListener('factory:photochange', updatePhotoVisual);
+
+  $('mobile-print').addEventListener('click', () => $('print-button').click());
+  $('mobile-download').addEventListener('click', () => {
+    document.querySelector('.export-panel')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+    $('social-status').textContent = 'Choose square, story, or Facebook below.';
+  });
+  window.factoryBrief = Object.freeze({collect: collectBrief, apply: applyBrief});
+
+  updatePhotoVisual();
   render();
-  window.factoryReady = (async () => {
+  window.factoryPageReady = (async () => {
     try {
       const fonts = await document.fonts.load('800 32px Manrope');
       await document.fonts.ready;
@@ -262,4 +381,6 @@
     render();
     return window.factoryReport();
   })();
+  // social.js extends this promise with deterministic check-mode exports.
+  window.factoryReady = window.factoryPageReady;
 })();

@@ -2,13 +2,33 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
   <title>Flyer Factory · CultureShyft Media</title>
   <link rel="icon" href="../logo/icons/favicon.ico">
   <link rel="stylesheet" href="factory.css">
+  <script>
+    window.factoryRuntimeErrors = [];
+    window.factoryRecordRuntimeError = function (error) {
+      var detail = error instanceof Error ? (error.stack || error.message) : String(error || 'Unknown JavaScript error');
+      if (!window.factoryRuntimeErrors.includes(detail)) window.factoryRuntimeErrors.push(detail);
+    };
+    window.addEventListener('error', function (event) {
+      var source = event.filename || (event.target && (event.target.src || event.target.href)) || '';
+      window.factoryRecordRuntimeError((event.message || 'Resource load failed') + (source ? ' (' + source + ')' : ''));
+    }, true);
+    window.addEventListener('unhandledrejection', function (event) {
+      var reason = event.reason;
+      window.factoryRecordRuntimeError('Unhandled rejection: ' + (reason instanceof Error ? (reason.stack || reason.message) : String(reason)));
+    });
+    window.factoryRuntimeErrorListeners = true;
+  </script>
   <script src="fit.js" defer></script>
+  <script src="vendor/qrcode.min.js" defer></script>
+  <script src="photo.js" defer></script>
+  <script src="qr.js" defer></script>
   <script src="factory.js" defer></script>
+  <script src="briefs.js" defer></script>
   <script src="social.js" defer></script>
 </head>
 <body>
@@ -18,7 +38,7 @@
   </header>
   <main class="workspace">
     <section class="editor" aria-labelledby="page-title">
-      <p class="eyebrow">01 / MAKE IT YOURS</p>
+      <div class="editor-tools"><p class="eyebrow">01 / MAKE IT YOURS</p><button type="button" class="quiet-button" id="open-briefs" aria-controls="briefs-drawer" aria-expanded="false">My flyers</button></div>
       <h1 id="page-title">A brief in.<br>A flyer out.</h1>
       <p class="intro">Add the details. Watch your flyer take shape.</p>
       <form id="brief" autocomplete="off">
@@ -43,26 +63,35 @@
         <input id="cta" name="cta" maxlength="100" placeholder="Reserve your spot today">
         <label for="contact">Contact line <span>required</span></label>
         <input id="contact" name="contact" maxlength="160" required placeholder="Website, email or phone number">
+        <label for="qr-url">QR code link <span>optional</span></label>
+        <input id="qr-url" name="qrUrl" type="url" inputmode="url" maxlength="140" placeholder="https://your-link.com" aria-describedby="qr-help">
+        <p class="field-help" id="qr-help">Add a full web link to place a scannable code on the flyer and story.</p>
         <label class="check-label" for="accent"><input type="checkbox" id="accent" name="accent" checked> Use Shyft Orange</label>
         <label for="photo">Photo upload <span>optional</span></label>
         <input type="file" id="photo" accept="image/jpeg,image/png,image/webp" aria-describedby="photo-help photo-status">
         <p class="field-help" id="photo-help">JPG, PNG or WebP, up to 12 MB. Photos are cropped to fill. Announcement is type-only.</p>
         <div class="photo-actions"><button type="button" class="quiet-button" id="remove-photo" disabled>Remove photo</button><span id="photo-status" role="status">Your photo stays on this device.</span></div>
+        <div class="photo-controls" id="photo-controls" hidden>
+          <label for="photo-zoom">Photo zoom <output id="photo-zoom-value" for="photo-zoom">100%</output></label>
+          <input type="range" id="photo-zoom" min="100" max="250" step="1" value="100">
+          <p class="field-help">Drag the photo in the flyer preview to choose what stays in frame.</p>
+        </div>
       </form>
-      <p class="session-note">Keep this tab open while you work. Save a PDF before closing; this page does not save your brief.</p>
+      <div class="brief-actions"><button type="button" id="save-brief">Save to My flyers</button><button type="button" class="quiet-button" id="export-brief">Export brief</button><label class="quiet-button import-label" for="import-brief">Import brief</label><input type="file" id="import-brief" accept="application/json,.json" hidden></div>
+      <p class="session-note" id="save-status" role="status">Your current brief autosaves on this device.</p>
     </section>
     <section class="preview-panel" aria-labelledby="preview-title">
       <div class="preview-heading"><div><p class="eyebrow">02 / CHECK YOUR FLYER</p><h2 id="preview-title">Ready for the real world.</h2></div><span class="paper-size">8.5 × 11 IN</span></div>
       <div class="preview-well" id="preview-well">
         <div class="preview-scale" id="preview-scale">
           <article class="flyer" id="flyer" data-layout="poster" aria-label="Live flyer preview">
-            <div class="photo-area" id="photo-area" aria-hidden="true"><img id="flyer-photo" alt="" hidden><div class="photo-art"><span></span><span></span><span></span></div></div>
+            <div class="photo-area" id="photo-area" aria-label="Photo crop preview"><img id="flyer-photo" alt="" hidden draggable="false"><div class="photo-art"><span></span><span></span><span></span></div></div>
             <div class="headline-panel"><h2 id="flyer-headline" data-fit="headline"></h2><p id="flyer-subheadline" data-fit="subheadline"></p></div>
             <div class="date-panel"><p class="flyer-label">WHEN</p><p id="flyer-date" data-fit="date"></p></div>
             <div class="place-panel"><p class="flyer-label">WHERE</p><p id="flyer-place" data-fit="place"></p></div>
             <div class="body-panel"><p id="flyer-body" data-fit="body"></p></div>
             <div class="cta-panel"><p id="flyer-cta" data-fit="cta"></p></div>
-            <footer class="flyer-footer"><p id="flyer-contact" data-fit="contact"></p><div class="logo-space"><img id="flyer-logo" src="../logo/web/cultureshyft-horizontal-color-onlight.png" alt="CultureShyft Media"></div></footer>
+            <footer class="flyer-footer"><p id="flyer-contact" data-fit="contact"></p><div class="flyer-qr" id="flyer-qr" hidden aria-label="QR code"></div><div class="logo-space"><img id="flyer-logo" src="../logo/web/cultureshyft-horizontal-color-onlight.png" alt="CultureShyft Media"></div></footer>
           </article>
         </div>
       </div>
@@ -81,6 +110,13 @@
       </div>
     </section>
   </main>
+  <aside class="briefs-drawer" id="briefs-drawer" aria-labelledby="briefs-title" aria-hidden="true">
+    <div class="drawer-head"><div><p class="eyebrow">SAVED ON THIS DEVICE</p><h2 id="briefs-title">My flyers</h2></div><button type="button" class="icon-button" id="close-briefs" aria-label="Close My flyers">×</button></div>
+    <p class="drawer-help">Open, copy, or remove a saved flyer. Export a JSON copy before clearing browser data.</p>
+    <div id="brief-list" class="brief-list"></div>
+  </aside>
+  <div class="drawer-scrim" id="drawer-scrim" hidden></div>
+  <nav class="mobile-actions" aria-label="Flyer downloads"><button type="button" id="mobile-print">Save as PDF</button><button type="button" id="mobile-download">Download PNG</button></nav>
   <noscript>This flyer needs JavaScript. Enable it in your browser, then reload this page. Your files are not changed.</noscript>
 </body>
 </html>
