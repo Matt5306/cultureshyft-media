@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>Order a flyer · CultureShyft Media</title>
+  <link rel="icon" href="../logo/icons/favicon.ico">
+  <link rel="stylesheet" href="../factory/factory.css">
+  <script>
+    window.factoryRuntimeErrors = [];
+    window.factoryRecordRuntimeError = function (error) {
+      var detail = error instanceof Error ? (error.stack || error.message) : String(error || 'Unknown JavaScript error');
+      if (!window.factoryRuntimeErrors.includes(detail)) window.factoryRuntimeErrors.push(detail);
+    };
+    window.addEventListener('error', function (event) {
+      var source = event.filename || (event.target && (event.target.src || event.target.href)) || '';
+      window.factoryRecordRuntimeError((event.message || 'Resource load failed') + (source ? ' (' + source + ')' : ''));
+    }, true);
+    window.addEventListener('unhandledrejection', function (event) {
+      var reason = event.reason;
+      window.factoryRecordRuntimeError('Unhandled rejection: ' + (reason instanceof Error ? (reason.stack || reason.message) : String(reason)));
+    });
+    window.factoryRuntimeErrorListeners = true;
+  </script>
+  <script src="../factory/fit.js" defer></script>
+  <script src="../factory/vendor/qrcode.min.js" defer></script>
+  <script src="../factory/photo.js" defer></script>
+  <script src="../factory/qr.js" defer></script>
+  <script src="../factory/share.js" defer></script>
+  <script src="../factory/factory.js" defer></script>
+  <script src="order.js" defer></script>
+  <link rel="stylesheet" href="order.css">
+  <script src="../factory/social.js" defer></script>
+</head>
+<body class="order-page">
+  <header class="app-header">
+    <a href="../index.html" aria-label="CultureShyft Media home"><img src="../logo/web/cultureshyft-horizontal-color-onlight.png" alt="CultureShyft Media" width="200"></a>
+    <span class="edition">YOUR FLYER / START HERE</span>
+  </header>
+  <main class="workspace">
+    <section class="editor" aria-labelledby="page-title">
+      <div class="editor-tools"><p class="eyebrow">01 / MAKE IT YOURS</p><button type="button" class="quiet-button" id="open-briefs" aria-controls="briefs-drawer" aria-expanded="false">My flyers</button></div>
+      <h1 id="page-title">Your next move.<br>Ready to share.</h1>
+      <p class="intro">Flyer $20, includes the Instagram square. One design, a Letter PDF, and 1 edit round. Add your details, check the draft, then send your request to Mark.</p>
+      <label for="preset">Start with a sample</label>
+      <select id="preset"><option value="">Choose an occasion…</option></select>
+      <p class="field-help" id="preset-status" role="status">Samples use made-up details. Replace them before sharing.</p>
+      <form id="brief" autocomplete="off">
+        <label for="layout">Layout</label>
+        <select id="layout" name="layout">
+          <option value="poster">Poster — photo &amp; bold headline</option>
+          <option value="event">Event — date &amp; details</option>
+          <option value="announcement">Announcement — just the message</option>
+        </select>
+        <label for="headline">Headline <span>required</span></label>
+        <input id="headline" name="headline" maxlength="140" required placeholder="What's happening?">
+        <label for="subheadline">Subheadline</label>
+        <input id="subheadline" name="subheadline" maxlength="180" placeholder="One sentence that makes it matter">
+        <label for="date">Date &amp; time</label>
+        <input id="date" name="date" maxlength="100" placeholder="Saturday, October 24 · 2–6 PM">
+        <label for="place">Place</label>
+        <input id="place" name="place" maxlength="140" placeholder="Venue name and address">
+        <label for="body">What should people know? <span>3 lines max on the flyer</span></label>
+        <textarea id="body" name="body" rows="3" maxlength="450" placeholder="The three things people need to know." aria-describedby="body-help"></textarea>
+        <p class="field-help" id="body-help">Keep it short. Extra text is shortened in the preview; your full text stays here.</p>
+        <label for="cta">What should people do next?</label>
+        <input id="cta" name="cta" maxlength="100" placeholder="Reserve your spot today">
+        <label for="contact">Contact shown on the flyer <span>required</span></label>
+        <input id="contact" name="contact" maxlength="160" required placeholder="Website, email or phone number">
+        <label for="qr-url">QR code link <span>optional</span></label>
+        <input id="qr-url" name="qrUrl" type="url" inputmode="url" maxlength="140" placeholder="https://your-link.com" aria-describedby="qr-help">
+        <p class="field-help" id="qr-help">Add a full web link to place a scannable code on the flyer and story.</p>
+        <label class="check-label" for="accent"><input type="checkbox" id="accent" name="accent" checked> Use Shyft Orange</label>
+        <label for="photo">Photo upload <span>optional</span></label>
+        <input type="file" id="photo" accept="image/jpeg,image/png,image/webp" aria-describedby="photo-help photo-status">
+        <p class="field-help" id="photo-help">JPG, PNG or WebP, up to 12 MB. Photos are cropped to fill. Announcement is type-only.</p>
+        <div class="photo-actions"><button type="button" class="quiet-button" id="remove-photo" disabled>Remove photo</button><span id="photo-status" role="status">Your photo stays on this device.</span></div>
+        <div class="photo-controls" id="photo-controls" hidden>
+          <label for="photo-zoom">Photo zoom <output id="photo-zoom-value" for="photo-zoom">100%</output></label>
+          <input type="range" id="photo-zoom" min="100" max="250" step="1" value="100">
+          <p class="field-help">Drag the photo in the flyer preview to choose what stays in frame.</p>
+        </div>
+
+        <details class="order-details" open>
+          <summary>Your details &amp; optional extras</summary>
+          <label for="clientName">Your name or business</label><input id="clientName" name="clientName" required maxlength="100">
+          <label for="clientEmail">Your reply email</label><input id="clientEmail" name="clientEmail" required type="email" maxlength="160">
+          <label for="extraSizes">Extra sizes · $5 each</label><select id="extraSizes" name="extraSizes"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select>
+          <label for="extraEdits">Extra edit rounds · $5 each</label><select id="extraEdits" name="extraEdits"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select>
+          <label class="check-label"><input type="checkbox" name="printReady" id="printReady"> Print preparation · +$10</label>
+          <label class="check-label"><input type="checkbox" name="rush" id="rush"> Rush · +$15, if available</label>
+          <p class="field-help">One edit round and the Instagram square are included. The factory PDF is for home/office printing; commercial print preparation requires your printer’s specifications.</p>
+        </details>
+      </form>
+      <div class="brief-actions"><button type="button" id="save-brief">Save to My flyers</button><button type="button" class="quiet-button" id="export-brief">Export brief</button><label class="quiet-button import-label" for="import-brief">Import brief</label><input type="file" id="import-brief" accept="application/json,.json" hidden></div>
+      <p class="session-note" id="save-status" role="status">Your current brief autosaves on this device.</p>
+    </section>
+    <section class="preview-panel" aria-labelledby="preview-title">
+      <div class="preview-heading"><div><p class="eyebrow">02 / CHECK YOUR FLYER</p><h2 id="preview-title">Ready for the real world.</h2></div><span class="paper-size">8.5 × 11 IN</span></div>
+      <div class="preview-well" id="preview-well">
+        <div class="preview-scale" id="preview-scale">
+          <article class="flyer" id="flyer" data-layout="poster" aria-label="Live flyer preview">
+            <div class="photo-area" id="photo-area" aria-label="Photo crop preview"><img id="flyer-photo" alt="" hidden draggable="false"><div class="photo-art"><span></span><span></span><span></span></div></div>
+            <div class="headline-panel"><h2 id="flyer-headline" data-fit="headline"></h2><p id="flyer-subheadline" data-fit="subheadline"></p></div>
+            <div class="date-panel"><p class="flyer-label">WHEN</p><p id="flyer-date" data-fit="date"></p></div>
+            <div class="place-panel"><p class="flyer-label">WHERE</p><p id="flyer-place" data-fit="place"></p></div>
+            <div class="body-panel"><p id="flyer-body" data-fit="body"></p></div>
+            <div class="cta-panel"><p id="flyer-cta" data-fit="cta"></p></div>
+            <footer class="flyer-footer"><p id="flyer-contact" data-fit="contact"></p><div class="flyer-qr" id="flyer-qr" hidden aria-label="QR code"></div><div class="logo-space"><img id="flyer-logo" src="../logo/web/cultureshyft-horizontal-color-onlight.png" alt="CultureShyft Media"></div></footer>
+          </article>
+        </div>
+      </div>
+      <div class="order-send">
+        <p class="eyebrow">03 / SEND YOUR REQUEST</p>
+        <h2>Ready for Mark?</h2>
+        <p id="order-total">Flyer $20, includes the Instagram square.</p>
+        <p>50% deposit to begin. Balance due on delivery. Mark confirms the price, rush availability and delivery date. Prices and terms are subject to Mark’s approval.</p>
+        <p>This preview is a draft. Attach your photos to the email separately. Your details stay in this page until you send them through your email app.</p>
+        <a class="send-button" id="send-mark" href="mailto:mark@cultureshyftmedia.com">Send to Mark</a>
+        <p id="order-status" role="status">Next: replace sample details, then send. Your email app opens; review and press Send there.</p>
+        <label for="order-copy">Copy this text if your email app does not open</label>
+        <textarea id="order-copy" rows="8" readonly></textarea>
+        <button type="button" class="quiet-button" id="copy-order">Copy request</button>
+        <p class="field-help">Email it to mark@cultureshyftmedia.com. The brief link contains the details above; share it only with people you choose. This page does not save your request. Copy it before leaving.</p>
+      </div>
+      <div class="export-panel">
+        <p class="eyebrow">03 / TAKE IT WITH YOU</p>
+        <p id="next-step" role="status">Start with a headline and contact line.</p>
+        <div class="export-actions">
+          <button type="button" id="print-button">Save as PDF <span aria-hidden="true">↗</span></button>
+          <button type="button" class="social-button" data-social-export="square">Download Instagram square <span>1080 × 1080</span></button>
+          <button type="button" class="social-button" data-social-export="story">Download Instagram story <span>1080 × 1920</span></button>
+          <button type="button" class="social-button" data-social-export="facebook">Download Facebook event cover <span>1920 × 1005</span></button>
+        </div>
+        <p class="print-help">Choose Save as PDF, Letter, no margins, background graphics on.</p>
+        <p class="print-help">Square keeps the headline, date and place clear. Story adds the body and call to action.</p>
+        <p class="print-help" id="social-status" role="status">Social downloads are full-size PNG files, ready to post.</p>
+      </div>
+    </section>
+  </main>
+  <aside class="briefs-drawer" id="briefs-drawer" aria-labelledby="briefs-title" aria-hidden="true">
+    <div class="drawer-head"><div><p class="eyebrow">SAVED ON THIS DEVICE</p><h2 id="briefs-title">My flyers</h2></div><button type="button" class="icon-button" id="close-briefs" aria-label="Close My flyers">×</button></div>
+    <p class="drawer-help">Open, copy, or remove a saved flyer. Export a JSON copy before clearing browser data.</p>
+    <div id="brief-list" class="brief-list"></div>
+  </aside>
+  <div class="drawer-scrim" id="drawer-scrim" hidden></div>
+  <nav class="mobile-actions" aria-label="Flyer downloads"><button type="button" id="mobile-print">Save as PDF</button><button type="button" id="mobile-download">Download PNG</button></nav>
+  <noscript>This flyer needs JavaScript. Enable it in your browser, then reload this page. Your files are not changed.</noscript>
+</body>
+</html>
