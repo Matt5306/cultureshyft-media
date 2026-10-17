@@ -6,15 +6,38 @@
   const TIMEOUT_MS = 30000;
   const FIELD_LIMITS = Object.freeze({headline: 140, subheadline: 180, body: 450, cta: 100});
   const PROVIDERS = Object.freeze({
-    gemini: Object.freeze({label: 'Gemini', adapter: 'gemini', model: 'gemini-3.6-flash', modelPlaceholder: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', keyRequired: true}),
-    openai: Object.freeze({label: 'OpenAI', adapter: 'openai', model: 'gpt-6-luna', modelPlaceholder: '', baseUrl: 'https://api.openai.com/v1', keyRequired: true}),
-    claude: Object.freeze({label: 'Claude', adapter: 'anthropic', model: 'claude-haiku-5-5', modelPlaceholder: '', baseUrl: 'https://api.anthropic.com/v1', keyRequired: true}),
-    openrouter: Object.freeze({label: 'OpenRouter', adapter: 'openai', model: '', modelPlaceholder: 'provider/model', baseUrl: 'https://openrouter.ai/api/v1', keyRequired: true}),
+    gemini: Object.freeze({label: 'Gemini', adapter: 'gemini', model: 'gemini-3.6-flash', modelPlaceholder: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', keyRequired: true, keyUrl: 'https://aistudio.google.com/apikey', keyLinkText: 'Get a free Gemini key', keyHowTo: 'Sign in, choose Create API key, copy the key, then paste it here.'}),
+    openai: Object.freeze({label: 'OpenAI', adapter: 'openai', model: 'gpt-6-luna', modelPlaceholder: '', baseUrl: 'https://api.openai.com/v1', keyRequired: true, keyUrl: 'https://platform.openai.com/api-keys', keyLinkText: 'Get an OpenAI key', keyHowTo: 'Sign in, create a new secret key, copy it, then paste it here.'}),
+    claude: Object.freeze({label: 'Claude', adapter: 'anthropic', model: 'claude-haiku-5-5', modelPlaceholder: '', baseUrl: 'https://api.anthropic.com/v1', keyRequired: true, keyUrl: 'https://console.anthropic.com/settings/keys', keyLinkText: 'Get a Claude key', keyHowTo: 'Sign in, create a key, copy it, then paste it here.'}),
+    openrouter: Object.freeze({label: 'OpenRouter', adapter: 'openai', model: '', modelPlaceholder: 'provider/model', baseUrl: 'https://openrouter.ai/api/v1', keyRequired: true, keyUrl: 'https://openrouter.ai/settings/keys', keyLinkText: 'Get an OpenRouter key', keyHowTo: 'Sign in, create a key, copy it, then paste it here.'}),
     local: Object.freeze({label: 'Local AI', adapter: 'openai', model: '', modelPlaceholder: 'model name shown in LM Studio / Ollama', baseUrl: 'http://localhost:1234/v1', keyRequired: false})
   });
+  // Shared brand content for every writing task. Keep in sync with brand-voice.md
+  // and the spelling/headline rules in brand-prompt.md (checked by acceptance).
+  const BRAND_VOICE = `Media made to move people.
+Bold, warm, quick, clear. Confident without hype. We say "flyer", not "collateral". We say "you", not "clients".
+Short sentences. One idea each.
+Lead with what the reader gets.
+Numbers as numbers (48 hours, 3 sizes), never spelled out.
+No exclamation marks in body text; the orange does the shouting.
+Spell it CultureShyft, every time.
+no "Culture Shift" spelling; no emoji in headlines.
+Words to avoid: collateral, clients, Culture Shift, game-changing, revolutionary, unleash.`;
+  const VERSION_LABELS = Object.freeze(['Bold', 'Warm', 'Short']);
   const SYSTEM_PROMPT = `You write flyer copy for CultureShyft Media.
-Voice: bold, warm, quick, and clear. Be confident without hype. Say "flyer", not "collateral". Speak to "you". Use short sentences with one idea each. Lead with what the reader gets. Write numbers as digits. Do not use exclamation marks. Spell CultureShyft exactly.
-Return only a JSON object with string keys headline, subheadline, body, and cta. Maximum lengths: headline 140 characters; subheadline 180; body 450; cta 100. Never invent a date, place, price, contact detail, guarantee, or private customer detail.`;
+${BRAND_VOICE}
+Return only valid JSON, without commentary or code fences: {"versions":[{"label":"Bold","headline":"","subheadline":"","body":"","cta":""},{"label":"Warm","headline":"","subheadline":"","body":"","cta":""},{"label":"Short","headline":"","subheadline":"","body":"","cta":""}]}.
+Write 3 distinct versions labelled Bold, Warm, Short, in that order. Every version follows all brand rules. Maximum lengths: headline 140 characters; subheadline 180; body 450; cta 100. Never invent a date, place, price, contact detail, guarantee, or private customer detail.`;
+  const VERSION_SCHEMA = {
+    type: 'OBJECT', required: ['versions'], properties: {
+      versions: {type: 'ARRAY', minItems: 3, maxItems: 3, items: {
+        type: 'OBJECT', required: ['label', ...Object.keys(FIELD_LIMITS)], properties: {
+          label: {type: 'STRING', enum: VERSION_LABELS},
+          ...Object.fromEntries(Object.keys(FIELD_LIMITS).map(field => [field, {type: 'STRING'}]))
+        }
+      }}
+    }
+  };
 
   class AIError extends Error {
     constructor(code, status = 0) { super(code); this.name = 'AIError'; this.code = code; this.status = status; }
@@ -145,7 +168,8 @@ Return only a JSON object with string keys headline, subheadline, body, and cta.
     const body = {
       systemInstruction: {parts: [{text: prompts.system}]},
       contents: [{role: 'user', parts: [{text: prompts.user}]}],
-      generationConfig: {responseMimeType: 'application/json', maxOutputTokens: prompts.test ? 40 : 700}
+      generationConfig: {responseMimeType: 'application/json', maxOutputTokens: prompts.test ? 40 : 2400,
+        ...(!prompts.test && /^gemini-(?:[23](?:\.|-)|flash)/i.test(config.model) ? {responseSchema: VERSION_SCHEMA} : {})}
     };
     const data = await responseData(await fetch(url, requestOptions({'Content-Type': 'application/json', 'x-goog-api-key': config.key}, body, signal)));
     if (data?.promptFeedback?.blockReason || !Array.isArray(data?.candidates) || !data.candidates.length) throw new AIError('blocked');
@@ -158,7 +182,7 @@ Return only a JSON object with string keys headline, subheadline, body, and cta.
     const endpoint = `${config.baseUrl.replace(/\/$/, '')}/chat/completions`;
     const headers = {'Content-Type': 'application/json'};
     if (config.key) headers.Authorization = `Bearer ${config.key}`;
-    const body = {model: config.model, messages: [{role: 'system', content: prompts.system}, {role: 'user', content: prompts.user}], max_tokens: prompts.test ? 40 : 700, response_format: {type: 'json_object'}};
+    const body = {model: config.model, messages: [{role: 'system', content: prompts.system}, {role: 'user', content: prompts.user}], max_tokens: prompts.test ? 40 : 2400, response_format: {type: 'json_object'}};
     const data = await responseData(await fetch(endpoint, requestOptions(headers, body, signal)));
     const choice = data?.choices?.[0];
     if (choice?.message?.refusal || choice?.finish_reason === 'content_filter') throw new AIError('blocked');
@@ -168,7 +192,7 @@ Return only a JSON object with string keys headline, subheadline, body, and cta.
   }
 
   async function callAnthropic(config, prompts, signal) {
-    const body = {model: config.model, max_tokens: prompts.test ? 40 : 700, system: prompts.system, messages: [{role: 'user', content: prompts.user}]};
+    const body = {model: config.model, max_tokens: prompts.test ? 40 : 2400, system: prompts.system, messages: [{role: 'user', content: prompts.user}]};
     const headers = {'Content-Type': 'application/json', 'x-api-key': config.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true'};
     const data = await responseData(await fetch(`${config.definition.baseUrl}/messages`, requestOptions(headers, body, signal)));
     if (data?.stop_reason === 'refusal' || data?.content?.some(part => part?.type === 'refusal')) throw new AIError('blocked');
@@ -258,12 +282,20 @@ Return only a JSON object with string keys headline, subheadline, body, and cta.
     let parsed;
     try { parsed = JSON.parse(text.slice(start, end + 1)); } catch (_) { throw new AIError('invalid_json'); }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new AIError('invalid_json');
-    const result = {};
-    for (const [field, limit] of Object.entries(FIELD_LIMITS)) {
-      if (typeof parsed[field] !== 'string') throw new AIError('invalid_json');
-      result[field] = scrubSuggestion(parsed[field], config).slice(0, limit).trim();
+    const candidates = Array.isArray(parsed.versions) ? parsed.versions : [parsed];
+    const versions = [];
+    for (const candidate of candidates) {
+      if (!candidate || !Object.keys(FIELD_LIMITS).every(field => typeof candidate[field] === 'string')) continue;
+      // Use only our labels; provider text never supplies attributes or markup.
+      const suppliedLabel = VERSION_LABELS.find(label => label.toLowerCase() === String(candidate.label || '').trim().toLowerCase());
+      const unused = VERSION_LABELS.filter(label => !versions.some(version => version.label === label));
+      const result = {label: unused.includes(suppliedLabel) ? suppliedLabel : unused[0]};
+      for (const [field, limit] of Object.entries(FIELD_LIMITS)) result[field] = scrubSuggestion(candidate[field], config).slice(0, limit).trim();
+      versions.push(result);
+      if (versions.length === 3) break;
     }
-    return result;
+    if (!versions.length) throw new AIError('invalid_json');
+    return versions;
   }
 
   function briefSnapshot() {
@@ -272,7 +304,7 @@ Return only a JSON object with string keys headline, subheadline, body, and cta.
   function generationPrompts(snapshot) {
     const selected = $('preset').value ? $('preset').selectedOptions[0]?.textContent || $('preset').value : 'No sample selected';
     const safeBrief = {occasion: selected, headline: snapshot.headline, subheadline: snapshot.subheadline, date: $('date').value, place: $('place').value, body: snapshot.body, cta: snapshot.cta};
-    const user = `Write the 4 requested fields using only this flyer information. Keep accurate details already supplied.
+    const user = `Write the 4 requested fields for each of the 3 versions using only this flyer information. Keep accurate details already supplied.
 Occasion: ${safeBrief.occasion}
 Headline: ${safeBrief.headline}
 Subheadline: ${safeBrief.subheadline}
@@ -288,15 +320,25 @@ Call to action: ${safeBrief.cta}`;
     const labels = {headline: 'Headline', subheadline: 'Subheadline', body: 'Body', cta: 'Call to action'};
     const list = $('ai-comparison-list');
     list.replaceChildren();
-    for (const field of Object.keys(FIELD_LIMITS)) {
+    suggestions.forEach((version, index) => {
+      const card = document.createElement('section'); card.className = 'ai-version'; card.dataset.aiVersion = index;
+      const title = document.createElement('h3'); title.className = 'ai-version-title'; title.textContent = version.label;
+      const useAll = document.createElement('button'); useAll.type = 'button'; useAll.className = 'ai-use-version'; useAll.dataset.aiUseAll = index; useAll.textContent = 'Use this';
+      useAll.setAttribute('aria-label', `Use this ${version.label} version`);
+      useAll.addEventListener('click', () => applySuggestion(index, Object.keys(FIELD_LIMITS)));
+      card.append(title, useAll);
+      for (const field of Object.keys(FIELD_LIMITS)) {
       const row = document.createElement('article'); row.className = 'ai-comparison'; row.dataset.aiField = field;
-      const heading = document.createElement('h3'); heading.textContent = labels[field];
+      const heading = document.createElement('h4'); heading.textContent = labels[field];
       const current = document.createElement('p'); current.className = 'ai-copy ai-current'; current.textContent = suggestionSnapshot[field] || '—';
-      const suggested = document.createElement('p'); suggested.className = 'ai-copy ai-suggested'; suggested.textContent = suggestions[field] || '—';
+      const suggested = document.createElement('p'); suggested.className = 'ai-copy ai-suggested'; suggested.textContent = version[field] || '—';
       const use = document.createElement('button'); use.type = 'button'; use.className = 'quiet-button'; use.dataset.aiUse = field; use.textContent = 'Use this';
-      use.addEventListener('click', () => applySuggestion([field]));
-      row.append(heading, current, suggested, use); list.append(row);
-    }
+      use.setAttribute('aria-label', `Use this ${version.label} ${labels[field].toLowerCase()}`);
+      use.addEventListener('click', () => applySuggestion(index, [field]));
+      row.append(heading, current, suggested, use); card.append(row);
+      }
+      list.append(card);
+    });
     $('ai-suggestions').hidden = false;
     $('ai-undo').hidden = !undoValues;
   }
@@ -304,10 +346,10 @@ Call to action: ${safeBrief.cta}`;
     $(field).value = String(value).slice(0, FIELD_LIMITS[field]);
     $(field).dispatchEvent(new Event('input', {bubbles: true}));
   }
-  function applySuggestion(fields) {
-    if (!suggestions) return;
+  function applySuggestion(index, fields) {
+    if (!suggestions?.[index]) return;
     const previous = briefSnapshot();
-    fields.forEach(field => setField(field, suggestions[field]));
+    fields.forEach(field => setField(field, suggestions[index][field]));
     undoValues = previous;
     $('ai-undo').hidden = false;
     $('ai-write-status').textContent = fields.length === 1 ? 'Suggestion used. Check it in the flyer. Undo is available.' : 'Suggestions used. Check every detail in the flyer. Undo is available.';
@@ -335,7 +377,10 @@ Call to action: ${safeBrief.cta}`;
       suggestions = parseSuggestion(raw, config);
       suggestionSnapshot = snapshot;
       renderSuggestions();
-      $('ai-write-status').textContent = 'Suggestion ready. Compare it with your text, then choose what to use.';
+      const status = `${suggestions.length} of 3 versions ready. ${suggestions.length < 3 ? 'The provider returned fewer usable versions. ' : ''}Compare them with your text, then choose what to use.`;
+      $('ai-write-status').textContent = status;
+      $('ai-versions-status').textContent = status;
+      $('ai-suggestions').scrollIntoView({block: 'start'});
     } catch (error) {
       $('ai-write-status').textContent = messageFor(error, config);
     }
@@ -353,6 +398,17 @@ Call to action: ${safeBrief.cta}`;
     $('ai-model').placeholder = definition.modelPlaceholder;
     $('ai-base-url-group').hidden = provider !== 'local';
     $('ai-key-group').hidden = provider === 'local';
+    $('ai-key-help').hidden = provider === 'local';
+    $('ai-local-note').hidden = provider !== 'local';
+    if (definition.keyUrl) {
+      $('ai-key-link').href = definition.keyUrl;
+      $('ai-key-link').textContent = definition.keyLinkText;
+      $('ai-key-howto').textContent = definition.keyHowTo;
+    } else {
+      $('ai-key-link').removeAttribute('href');
+      $('ai-key-link').textContent = '';
+      $('ai-key-howto').textContent = '';
+    }
     $('ai-forget-key').hidden = provider === 'local';
     $('ai-api-key').value = provider === 'local' ? '' : dialogKeys[provider] || '';
     $('ai-api-key').type = 'password'; $('ai-show-key').textContent = 'Show'; $('ai-show-key').setAttribute('aria-pressed', 'false');
@@ -490,12 +546,11 @@ Call to action: ${safeBrief.cta}`;
   $('ai-forget-confirm-yes').addEventListener('click', forgetKey);
   $('ai-write-button').addEventListener('click', writeForMe);
   $('ai-cancel-button').addEventListener('click', () => cancelRequest('write'));
-  $('ai-use-all').addEventListener('click', () => applySuggestion(Object.keys(FIELD_LIMITS)));
   $('ai-undo').addEventListener('click', undo);
   for (const field of Object.keys(FIELD_LIMITS)) $(field).addEventListener('input', () => {
     undoValues = null;
     $('ai-undo').hidden = true;
   });
 
-  window.factoryAI = Object.freeze({PROVIDERS, openSettings, parseSuggestion});
+  window.factoryAI = Object.freeze({PROVIDERS, BRAND_VOICE, openSettings, parseSuggestion});
 })();
