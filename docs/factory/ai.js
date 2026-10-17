@@ -24,6 +24,7 @@ Return only a JSON object with string keys headline, subheadline, body, and cta.
   let storageWarning = '';
   let storageWarningShown = false;
   let activeRequest = null;
+  let connectionTestVersion = 0;
   let suggestions = null;
   let suggestionSnapshot = null;
   let undoValues = null;
@@ -403,17 +404,26 @@ Call to action: ${safeBrief.cta}`;
   async function testConnection() {
     let config;
     try { config = configFromDialog(true); } catch (error) { $('ai-settings-status').textContent = messageFor(error); return; }
+    // A rejected second tap must not orphan the request already in flight:
+    // only a test that actually starts takes ownership of the status line.
+    if (activeRequest) { $('ai-settings-status').textContent = messageFor(new AIError('busy'), config); return; }
+    const version = ++connectionTestVersion;
     $('ai-settings-status').textContent = `Testing ${config.definition.label}…`;
     try {
       await withRequest('test', signal => callProvider(config, testPrompts(), signal));
+      if (version !== connectionTestVersion) return;
       $('ai-settings-status').textContent = `Connected. ${config.definition.label} answered.`;
     } catch (error) {
+      if (version !== connectionTestVersion) return;
       $('ai-settings-status').textContent = messageFor(error, config);
     }
   }
   function forgetKey() {
     const provider = $('ai-provider').value;
-    const targets = new Set([$('ai-api-key').value.trim(), dialogKeys[provider], settings.keys[provider]].filter(Boolean));
+    // A cancelled test must not overwrite this operation's removal report.
+    connectionTestVersion += 1;
+    const normalize = value => typeof value === 'string' ? value.trim() : '';
+    const targets = new Set([$('ai-api-key').value, dialogKeys[provider], settings.keys[provider]].map(normalize).filter(Boolean));
     const stores = [];
     const blocked = [];
     const reset = [];
@@ -425,7 +435,8 @@ Call to action: ${safeBrief.cta}`;
         const raw = storage.getItem(STORAGE_KEY);
         const saved = raw ? JSON.parse(raw) : null;
         if (saved && (!saved.keys || typeof saved.keys !== 'object' || Array.isArray(saved.keys))) throw new Error('invalid');
-        if (saved?.keys[provider]) targets.add(saved.keys[provider]);
+        const storedKey = normalize(saved?.keys[provider]);
+        if (storedKey) targets.add(storedKey);
         stores.push({name, storage, saved});
       } catch (_) {
         try { window[name].removeItem(STORAGE_KEY); reset.push(name); }
@@ -435,7 +446,7 @@ Call to action: ${safeBrief.cta}`;
     const removed = new Set();
     function removeCopies(keys) {
       for (const [slot, key] of Object.entries(keys)) {
-        if (slot === provider || targets.has(key)) {
+        if (slot === provider || targets.has(normalize(key))) {
           if (key) removed.add(PROVIDERS[slot]?.label || slot);
           delete keys[slot];
         }

@@ -399,12 +399,18 @@ def check_ai(chrome, output_dir):
             expect(page.locator('#open-ai-settings')).to_be_focused()
             page.set_viewport_size({'width': 1024, 'height': 1366})
 
-            # Forget removes every matching slot in memory AND both storage types.
+            # Padded credentials remain usable, so Forget must match their trimmed
+            # values in settings memory and both storage types (including targets).
             page.evaluate('''k => {
               const saved = JSON.parse(localStorage.getItem(k));
-              saved.keys.local = saved.keys.gemini;
+              saved.keys.openai = '  ' + saved.keys.gemini + '  ';
+              saved.keys.claude = '\\t' + saved.keys.gemini + '\\t';
+              saved.keys.local = ' ' + saved.keys.gemini;
               localStorage.setItem(k, JSON.stringify(saved));
-              sessionStorage.setItem(k, localStorage.getItem(k));
+              saved.keys.gemini = '  session-' + 'TEST'.repeat(8) + '\\t';
+              saved.keys.local = saved.keys.gemini.trim();
+              saved.keys.openrouter = '\\t' + saved.keys.openrouter + ' ';
+              sessionStorage.setItem(k, JSON.stringify(saved));
               sessionStorage.setItem('ai-unrelated-test', 'keep me');
             }''', AI_KEY)
             page.reload(); ready()
@@ -439,7 +445,7 @@ def check_ai(chrome, output_dir):
             page.locator('#ai-write-button').click()
             expect(page.locator('#ai-settings-dialog')).to_be_visible()
             page.keyboard.press('Escape')
-            print('PASS AI: accessible modal/touch targets, forget confirmation and reload recovery')
+            print('PASS AI: accessible modal/touch targets, padded copies forgotten in memory/local/session storage and reload recovery')
 
             # Distinct credentials are preserved; unsaved dialog copies are forgotten.
             choose('gemini'); save_settings()
@@ -447,11 +453,21 @@ def check_ai(chrome, output_dir):
             distinct_key = 'different-' + 'TEST' * 8
             page.locator('#ai-api-key').fill(distinct_key)
             save_settings()
-            choose('openai')  # unsaved copy in the dialog only
+            choose('openai')
+            page.locator('#ai-api-key').fill('  ' + FAKE_KEY + '\t')
+            page.locator('#ai-provider').select_option('claude')
+            save_settings()  # Saving another provider preserves the padded value.
+            open_settings()
+            page.locator('#ai-provider').select_option('openai')
+            expect(page.locator('#ai-api-key')).to_have_value('  ' + FAKE_KEY + '\t')
+            choose('openrouter')  # Another padded copy exists only in dialog memory.
+            page.locator('#ai-api-key').fill('\t' + FAKE_KEY + ' ')
             page.locator('#ai-provider').select_option('gemini')
             page.locator('#ai-forget-key').click()
             page.locator('#ai-forget-confirm-yes').click()
             page.locator('#ai-provider').select_option('openai')
+            expect(page.locator('#ai-api-key')).to_have_value('')
+            page.locator('#ai-provider').select_option('openrouter')
             expect(page.locator('#ai-api-key')).to_have_value('')
             page.locator('#ai-provider').select_option('claude')
             expect(page.locator('#ai-api-key')).to_have_value(distinct_key)
@@ -459,7 +475,7 @@ def check_ai(chrome, output_dir):
             assert FAKE_KEY not in json.dumps(stored)
             assert stored['keys']['claude'] == distinct_key
             page.keyboard.press('Escape')
-            print('PASS AI: forget clears unsaved matching copies and preserves distinct provider keys')
+            print('PASS AI: forget clears padded unsaved dialog copies and preserves distinct provider keys')
 
             # Local failures explain exact server fixes, with no cloud key attached.
             choose('local'); save_settings()
@@ -491,7 +507,9 @@ def check_ai(chrome, output_dir):
             page.locator('#ai-test-connection').click()
             expect(page.locator('#ai-test-connection')).to_have_text('Working...')
             page.locator('#ai-test-connection').dispatch_event('click')
+            expect(page.locator('#ai-settings-status')).to_contain_text('already working')
             assert len(calls) == count + 1
+            # The rejected second tap must not orphan the first test's result.
             page.locator('#ai-test-cancel-button').click()
             expect(page.locator('#ai-settings-status')).to_contain_text('Cancelled')
             page.keyboard.press('Escape')
@@ -542,33 +560,52 @@ def check_ai(chrome, output_dir):
                 page.close(); page = main_page
                 print(f'PASS AI: {failure} storage, session fallback, warning, usable generation')
 
-            # Failed storage updates must fall back to removal, or report failure
-            # honestly while still clearing all in-memory copies.
+            # Forget cancels a held connection test. After its rejection settles,
+            # the removal report must survive, including blocked-storage warnings.
+            # Failed storage updates fall back to removal or report failure honestly.
             page.goto(checks.FACTORY_PAGE.as_uri()); ready()
-            for failure in ('write-fails', 'removal-blocked'):
+            for failure in ('normal', 'write-fails', 'removal-blocked'):
                 choose('gemini'); save_settings()
                 choose('openai'); save_settings()
-                page.evaluate('''({k, blocked}) => {
+                page.evaluate('''({k, failure}) => {
                   sessionStorage.setItem(k, localStorage.getItem(k));
                   window.aiOriginalSet = Storage.prototype.setItem;
                   window.aiOriginalRemove = Storage.prototype.removeItem;
                   Storage.prototype.setItem = function(key, value) {
-                    if (key === k) throw new DOMException('full', 'QuotaExceededError');
+                    if (key === k && failure !== 'normal') throw new DOMException('full', 'QuotaExceededError');
                     return window.aiOriginalSet.call(this, key, value);
                   };
                   Storage.prototype.removeItem = function(key) {
-                    if (key === k && blocked) throw new DOMException('blocked', 'SecurityError');
+                    if (key === k && failure === 'removal-blocked') throw new DOMException('blocked', 'SecurityError');
                     return window.aiOriginalRemove.call(this, key);
                   };
-                }''', {'k': AI_KEY, 'blocked': failure == 'removal-blocked'})
+                }''', {'k': AI_KEY, 'failure': failure})
                 open_settings()
+                mock['mode'] = 'hold'
+                held_count = len(held)
+                page.locator('#ai-test-connection').click()
+                expect(page.locator('#ai-test-connection')).to_have_text('Working...')
+                assert len(held) == held_count + 1, 'Connection test was not intercepted and held'
                 page.locator('#ai-forget-key').click()
                 page.locator('#ai-forget-confirm-yes').click()
-                expected = 'blocked removal' if failure == 'removal-blocked' else 'saved AI settings were removed'
+                expect(page.locator('#ai-test-connection')).to_be_enabled()
+                expect(page.locator('#ai-test-connection')).to_have_text('Test connection')
+                expect(page.locator('#ai-test-cancel-button')).to_be_hidden()
+                expected = {'normal': 'All matching provider copies were removed',
+                            'write-fails': 'saved AI settings were removed',
+                            'removal-blocked': 'blocked removal'}[failure]
                 expect(page.locator('#ai-settings-status')).to_contain_text(expected)
                 for storage in ('localStorage', 'sessionStorage'):
                     saved = page.evaluate(f'(k) => {storage}.getItem(k)', AI_KEY)
-                    assert (FAKE_KEY in saved) if failure == 'removal-blocked' else saved is None
+                    if failure == 'normal':
+                        assert saved is not None and FAKE_KEY not in saved
+                        stored_keys = json.loads(saved)['keys']
+                        assert not stored_keys.get('gemini') and not stored_keys.get('openai')
+                    else:
+                        assert (FAKE_KEY in saved) if failure == 'removal-blocked' else saved is None
+                # Recheck after storage inspection, beyond the cancelled fetch's
+                # promise handlers, rather than accepting a transient success.
+                expect(page.locator('#ai-settings-status')).to_contain_text(expected)
                 for provider in ('gemini', 'openai'):
                     page.locator('#ai-provider').select_option(provider)
                     expect(page.locator('#ai-api-key')).to_have_value('')
@@ -585,11 +622,18 @@ def check_ai(chrome, output_dir):
                 page.locator('#ai-forget-key').click()
                 page.locator('#ai-forget-confirm-yes').click()
                 page.keyboard.press('Escape')
-                print(f'PASS AI: forget {failure}, memory cleared and storage outcome reported')
+                print(f'PASS AI: forget {failure} during held connection test, memory cleared and removal report preserved')
             assert not errors, errors
         except Exception as exc:
             raise checks.CheckFailure(f'AI helper: {exc}') from exc
         finally:
+            # Settle held (often already-cancelled) requests so closing the
+            # browser does not leave Playwright route handlers pending.
+            while held:
+                try:
+                    held.pop().abort()
+                except Exception:
+                    pass
             context.close()
     print('PASS AI helper: all mocked provider and safety checks (none skipped)')
 
