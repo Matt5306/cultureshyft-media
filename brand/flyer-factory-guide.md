@@ -36,7 +36,7 @@ Choose **Save to My flyers** to keep the job on this device. A received link or 
 
 ## Connect your AI
 
-**AI helper → Gemini → paste key → Test connection → Save → Write it for me → review → Use this**
+**AI helper → Gemini → paste key → Test connection → Save → Write it for me → review → Use this → Write the post → Copy**
 
 AI is optional and only available in the factory. Customers see no AI controls on the order page. Start with Gemini on the iPad:
 
@@ -49,6 +49,10 @@ AI is optional and only available in the factory. Customers see no AI controls o
 7. Choose an occasion and fill in the details you know. Tap **Write it for me** near Headline.
 8. The page moves to a review panel with **Bold**, **Warm**, and **Short** versions from one request. They sit side by side on wide screens and stack on narrow screens. Compare **Your text** and **Suggested**, checking facts, tone and spelling. Tap **Use this** at the top of your chosen version to apply its headline, subheadline, body and call to action. Tap **Use this** under one field to apply only that field. Nothing changes before that tap.
 9. Tap **Undo** to restore the exact values from immediately before your last acceptance. It is one level, not a history. A new AI reply keeps Undo available; your own edits clear it so Undo cannot overwrite your manual work.
+
+When the flyer has both its required headline and contact line, **Write the post** becomes available under the social-image downloads. One tap sends the headline, subheadline, date, place, body and call to action to the provider and returns an Instagram caption, up to 8 cleaned hashtags and a Facebook event description. The contact line only unlocks the button; it is never sent. Check that dates, times and addresses match the flyer exactly. Each result box shows its live character count and can be edited for this open page. Tap the **Copy** button under a box to copy only that box; **Copied** confirms success. If browser copying is blocked, the text stays selected so you can use the device’s Copy command. These post results are temporary: they are not added to saved flyers, autosave or exported brief JSON.
+
+While either writing request is running, tap its **Cancel** button to stop waiting. A failed, cancelled or timed-out post request leaves the last successful post on screen. There is no automatic retry.
 
 Every writing request includes the shared CultureShyft voice rules and the exact tagline, “Media made to move people.” AI can still make mistakes; check the result. If a reply has only 1 or 2 usable versions, the panel tells you and shows those choices. You can use one or tap **Write it for me** again. Failed or cancelled requests preserve your flyer and earlier choices; there is no automatic retry. Unaccepted versions stay only in this open page and disappear on reload.
 
@@ -66,7 +70,7 @@ A free Gemini key does not mean unlimited requests. Limits are per project and v
 
 Model names are editable because availability can change. For local AI, in LM Studio **turn on Enable CORS in the Developer tab and Start server**. For Ollama, set `OLLAMA_ORIGINS=https://cultureshyftmedia.com` then restart Ollama. Safari on iPad usually cannot reach a local `http://` server from an https page, so use Gemini on the iPad. `localhost` means the device running the browser, not another computer.
 
-Only tapping **Test connection** or **Write it for me** sends an AI request. Writing sends the selected occasion and headline, subheadline, date, place, body and call to action. It does not send the contact field, customer name/email, QR URL or photo. Anything private typed into an allowed text field would still be sent. Suggestions stay on this page until accepted; accepted copy uses the normal brief save/export flow.
+Only tapping **Test connection**, **Write it for me** or **Write the post** sends an AI request. **Write it for me** sends the selected occasion and headline, subheadline, date, place, body and call to action. **Write the post** sends those same flyer fields except the occasion. Neither writing action sends the contact field, customer name/email, QR URL or photo. Anything private typed into an allowed text field would still be sent. Suggestions stay on this page until accepted; accepted flyer copy uses the normal brief save/export flow. Post copy stays only on the open page.
 
 Your key stays in this browser and is only sent to the company you chose. Settings use one localStorage entry, `cultureshyft.factory.ai.v1`, shaped as `{provider, model, baseUrl, keys:{provider:key}}`. Keys are separate from briefs, exports and draft autosave. This is browser storage, not an encrypted password vault; use a trusted device/browser. If storage is blocked or full, the helper warns once and keeps settings in memory for this open session. Re-enter them after closing the page.
 

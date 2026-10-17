@@ -5,6 +5,7 @@
   const STORAGE_KEY = 'cultureshyft.factory.ai.v1';
   const TIMEOUT_MS = 30000;
   const FIELD_LIMITS = Object.freeze({headline: 140, subheadline: 180, body: 450, cta: 100});
+  const POST_LIMITS = Object.freeze({instagramCaption: 2200, instagramHook: 125, hashtags: 8, facebookAim: 1000, facebookDescription: 5000});
   const PROVIDERS = Object.freeze({
     gemini: Object.freeze({label: 'Gemini', adapter: 'gemini', model: 'gemini-3.6-flash', modelPlaceholder: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', keyRequired: true, keyUrl: 'https://aistudio.google.com/apikey', keyLinkText: 'Get a free Gemini key', keyHowTo: 'Sign in, choose Create API key, copy the key, then paste it here.'}),
     openai: Object.freeze({label: 'OpenAI', adapter: 'openai', model: 'gpt-6-luna', modelPlaceholder: '', baseUrl: 'https://api.openai.com/v1', keyRequired: true, keyUrl: 'https://platform.openai.com/api-keys', keyLinkText: 'Get an OpenAI key', keyHowTo: 'Sign in, create a new secret key, copy it, then paste it here.'}),
@@ -36,6 +37,18 @@ Write 3 distinct versions labelled Bold, Warm, Short, in that order. Every versi
           ...Object.fromEntries(Object.keys(FIELD_LIMITS).map(field => [field, {type: 'STRING'}]))
         }
       }}
+    }
+  };
+  const POST_SYSTEM_PROMPT = `You write social copy to accompany a finished CultureShyft Media flyer.
+${BRAND_VOICE}
+Return only valid JSON, without commentary or code fences: {"instagram_caption":"","hashtags":[],"facebook_description":""}.
+Put the Instagram hook within the first ${POST_LIMITS.instagramHook} characters and keep the full caption at or under ${POST_LIMITS.instagramCaption} characters. Return no more than ${POST_LIMITS.hashtags} relevant hashtags. Each hashtag must contain only letters and digits after #, with no spaces. Keep the Facebook event description near or under ${POST_LIMITS.facebookAim} characters and never over ${POST_LIMITS.facebookDescription} characters.
+Use no emoji by default. Use no exclamation marks in body copy. Copy every supplied date, time and address exactly. Never invent or alter a date, time, address, price, contact detail, guarantee or private customer detail.`;
+  const POST_SCHEMA = {
+    type: 'OBJECT', required: ['instagram_caption', 'hashtags', 'facebook_description'], properties: {
+      instagram_caption: {type: 'STRING'},
+      hashtags: {type: 'ARRAY', maxItems: POST_LIMITS.hashtags, items: {type: 'STRING'}},
+      facebook_description: {type: 'STRING'}
     }
   };
 
@@ -168,8 +181,8 @@ Write 3 distinct versions labelled Bold, Warm, Short, in that order. Every versi
     const body = {
       systemInstruction: {parts: [{text: prompts.system}]},
       contents: [{role: 'user', parts: [{text: prompts.user}]}],
-      generationConfig: {responseMimeType: 'application/json', maxOutputTokens: prompts.test ? 40 : 2400,
-        ...(!prompts.test && /^gemini-(?:[23](?:\.|-)|flash)/i.test(config.model) ? {responseSchema: VERSION_SCHEMA} : {})}
+      generationConfig: {responseMimeType: 'application/json', maxOutputTokens: prompts.test ? 40 : prompts.maxOutputTokens || 2400,
+        ...(!prompts.test && (prompts.schema || /^gemini-(?:[23](?:\.|-)|flash)/i.test(config.model)) ? {responseSchema: prompts.schema || VERSION_SCHEMA} : {})}
     };
     const data = await responseData(await fetch(url, requestOptions({'Content-Type': 'application/json', 'x-goog-api-key': config.key}, body, signal)));
     if (data?.promptFeedback?.blockReason || !Array.isArray(data?.candidates) || !data.candidates.length) throw new AIError('blocked');
@@ -182,7 +195,7 @@ Write 3 distinct versions labelled Bold, Warm, Short, in that order. Every versi
     const endpoint = `${config.baseUrl.replace(/\/$/, '')}/chat/completions`;
     const headers = {'Content-Type': 'application/json'};
     if (config.key) headers.Authorization = `Bearer ${config.key}`;
-    const body = {model: config.model, messages: [{role: 'system', content: prompts.system}, {role: 'user', content: prompts.user}], max_tokens: prompts.test ? 40 : 2400, response_format: {type: 'json_object'}};
+    const body = {model: config.model, messages: [{role: 'system', content: prompts.system}, {role: 'user', content: prompts.user}], max_tokens: prompts.test ? 40 : prompts.maxOutputTokens || 2400, response_format: {type: 'json_object'}};
     const data = await responseData(await fetch(endpoint, requestOptions(headers, body, signal)));
     const choice = data?.choices?.[0];
     if (choice?.message?.refusal || choice?.finish_reason === 'content_filter') throw new AIError('blocked');
@@ -192,7 +205,7 @@ Write 3 distinct versions labelled Bold, Warm, Short, in that order. Every versi
   }
 
   async function callAnthropic(config, prompts, signal) {
-    const body = {model: config.model, max_tokens: prompts.test ? 40 : 2400, system: prompts.system, messages: [{role: 'user', content: prompts.user}]};
+    const body = {model: config.model, max_tokens: prompts.test ? 40 : prompts.maxOutputTokens || 2400, system: prompts.system, messages: [{role: 'user', content: prompts.user}]};
     const headers = {'Content-Type': 'application/json', 'x-api-key': config.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true'};
     const data = await responseData(await fetch(`${config.definition.baseUrl}/messages`, requestOptions(headers, body, signal)));
     if (data?.stop_reason === 'refusal' || data?.content?.some(part => part?.type === 'refusal')) throw new AIError('blocked');
@@ -207,10 +220,13 @@ Write 3 distinct versions labelled Bold, Warm, Short, in that order. Every versi
 
   function setBusy(kind, busy) {
     $('ai-write-button').disabled = busy;
+    $('ai-post-button').disabled = busy || !postFieldsReady();
     $('ai-test-connection').disabled = busy;
     $('ai-save-settings').disabled = busy;
     $('ai-write-button').textContent = busy && kind === 'write' ? 'Working...' : 'Write it for me';
     $('ai-cancel-button').hidden = !(busy && kind === 'write');
+    $('ai-post-button').textContent = busy && kind === 'post' ? 'Working...' : 'Write the post';
+    $('ai-post-cancel-button').hidden = !(busy && kind === 'post');
     $('ai-test-connection').textContent = busy && kind === 'test' ? 'Working...' : 'Test connection';
     $('ai-test-cancel-button').hidden = !(busy && kind === 'test');
   }
@@ -275,13 +291,17 @@ Write 3 distinct versions labelled Bold, Warm, Short, in that order. Every versi
     for (const key of keys) if (key && key.length >= 4) text = text.split(key).join('[key removed]');
     return text.replace(/(?:AIza[\w-]{16,}|sk-(?:ant-|proj-|or-)?[\w-]{12,}|bearer\s+[\w.-]{12,})/gi, '[key removed]');
   }
-  function parseSuggestion(raw, config) {
+  function parseJSONObject(raw) {
     let text = String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
     const start = text.indexOf('{'); const end = text.lastIndexOf('}');
     if (start < 0 || end <= start) throw new AIError('invalid_json');
     let parsed;
     try { parsed = JSON.parse(text.slice(start, end + 1)); } catch (_) { throw new AIError('invalid_json'); }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new AIError('invalid_json');
+    return parsed;
+  }
+  function parseSuggestion(raw, config) {
+    const parsed = parseJSONObject(raw);
     const candidates = Array.isArray(parsed.versions) ? parsed.versions : [parsed];
     const versions = [];
     for (const candidate of candidates) {
@@ -296,6 +316,40 @@ Write 3 distinct versions labelled Bold, Warm, Short, in that order. Every versi
     }
     if (!versions.length) throw new AIError('invalid_json');
     return versions;
+  }
+
+  function trimAtBoundary(value, limit) {
+    const text = String(value || '').trim();
+    if (text.length <= limit) return text;
+    const candidate = text.slice(0, limit);
+    let sentenceEnd = -1;
+    for (const match of candidate.matchAll(/[.!?](?=\s|$)/g)) sentenceEnd = match.index + 1;
+    if (sentenceEnd >= Math.floor(limit / 2)) return candidate.slice(0, sentenceEnd).trim();
+    const wordEnd = candidate.search(/\s+\S*$/);
+    return (wordEnd > 0 ? candidate.slice(0, wordEnd) : candidate.slice(0, limit)).trim();
+  }
+  function normalizeHashtags(values, config) {
+    const result = [];
+    const seen = new Set();
+    for (const value of values) {
+      if (typeof value !== 'string') continue;
+      const word = scrubSuggestion(value, config).replace(/[^A-Za-z0-9]/g, '');
+      const normalized = word.toLowerCase();
+      if (!word || seen.has(normalized)) continue;
+      seen.add(normalized);
+      result.push(`#${word}`);
+      if (result.length === POST_LIMITS.hashtags) break;
+    }
+    return result;
+  }
+  function parsePost(raw, config) {
+    const parsed = parseJSONObject(raw);
+    if (typeof parsed.instagram_caption !== 'string' || !Array.isArray(parsed.hashtags) || typeof parsed.facebook_description !== 'string') throw new AIError('invalid_json');
+    return {
+      instagramCaption: trimAtBoundary(scrubSuggestion(parsed.instagram_caption, config), POST_LIMITS.instagramCaption),
+      hashtags: normalizeHashtags(parsed.hashtags, config),
+      facebookDescription: trimAtBoundary(scrubSuggestion(parsed.facebook_description, config), POST_LIMITS.facebookDescription)
+    };
   }
 
   function briefSnapshot() {
@@ -313,6 +367,13 @@ Place: ${safeBrief.place}
 Body: ${safeBrief.body}
 Call to action: ${safeBrief.cta}`;
     return {system: SYSTEM_PROMPT, user, test: false};
+  }
+  function postSnapshot() {
+    return {headline: $('headline').value, subheadline: $('subheadline').value, date: $('date').value, place: $('place').value, body: $('body').value, cta: $('cta').value};
+  }
+  function postPrompts(snapshot) {
+    const user = `Write the Instagram caption, hashtags and Facebook event description using only these flyer fields. Preserve supplied wording and copy every date, time and address exactly. Do not invent missing details.\nFlyer fields: ${JSON.stringify(snapshot)}`;
+    return {system: POST_SYSTEM_PROMPT, user, test: false, schema: POST_SCHEMA, maxOutputTokens: 2400};
   }
   const testPrompts = () => ({system: 'This is a connection test. Return JSON only.', user: 'Return exactly {"ok":true}.', test: true});
 
@@ -386,6 +447,73 @@ Call to action: ${safeBrief.cta}`;
     }
   }
 
+  function postFieldsReady() {
+    return Boolean($('headline').value.trim() && $('contact').value.trim());
+  }
+  function updatePostReadiness() {
+    $('ai-post-button').disabled = Boolean(activeRequest) || !postFieldsReady();
+  }
+  function hashtagCount(value) {
+    return String(value || '').trim().split(/\s+/).filter(item => /^#[A-Za-z0-9]+$/.test(item)).length;
+  }
+  function updatePostCounts() {
+    $('ai-instagram-count').textContent = `${$('ai-instagram-caption').value.length.toLocaleString()} / ${POST_LIMITS.instagramCaption.toLocaleString()} characters`;
+    $('ai-hashtags-count').textContent = `${$('ai-hashtags').value.length.toLocaleString()} characters · ${hashtagCount($('ai-hashtags').value)} / ${POST_LIMITS.hashtags} hashtags`;
+    $('ai-facebook-count').textContent = `${$('ai-facebook-description').value.length.toLocaleString()} / ${POST_LIMITS.facebookDescription.toLocaleString()} characters`;
+  }
+  function renderPost(post) {
+    $('ai-instagram-caption').value = post.instagramCaption;
+    $('ai-hashtags').value = post.hashtags.join(' ');
+    $('ai-facebook-description').value = post.facebookDescription;
+    document.querySelectorAll('[id$="-copy-status"]').forEach(status => { status.textContent = ''; });
+    updatePostCounts();
+    $('ai-post-results').hidden = false;
+  }
+  async function writePost() {
+    if (!postFieldsReady()) return;
+    if (!isConfigured()) {
+      $('ai-post-status').textContent = 'Connect an AI provider first.';
+      openSettings($('ai-post-button'));
+      return;
+    }
+    let config;
+    try { config = configFromSettings(); } catch (error) { $('ai-post-status').textContent = messageFor(error); openSettings($('ai-post-button')); return; }
+    const snapshot = postSnapshot();
+    $('ai-post-status').textContent = `${config.definition.label} is writing your post. Your earlier post stays here until a new one is ready.`;
+    try {
+      const raw = await withRequest('post', signal => callProvider(config, postPrompts(snapshot), signal));
+      const post = parsePost(raw, config);
+      renderPost(post);
+      $('ai-post-status').textContent = 'Your post is ready. Check every detail, then copy each part.';
+      $('ai-post-results').scrollIntoView({block: 'nearest'});
+    } catch (error) {
+      $('ai-post-status').textContent = messageFor(error, config);
+    }
+  }
+  async function copyPostField(fieldId) {
+    const field = $(fieldId);
+    const statusId = {'ai-instagram-caption': 'ai-instagram-copy-status', 'ai-hashtags': 'ai-hashtags-copy-status', 'ai-facebook-description': 'ai-facebook-copy-status'}[fieldId];
+    const status = $(statusId);
+    if (fieldId === 'ai-hashtags') {
+      field.value = normalizeHashtags(field.value.split(/\s+/), null).join(' ');
+      updatePostCounts();
+    }
+    let copied = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(field.value);
+        copied = true;
+      }
+    } catch (_) { /* Use the selection fallback below. */ }
+    if (!copied) {
+      field.focus();
+      field.select();
+      field.setSelectionRange(0, field.value.length);
+      try { copied = document.execCommand('copy'); } catch (_) { copied = false; }
+    }
+    status.textContent = copied ? 'Copied' : 'Text selected. Use Copy in your browser.';
+  }
+
   function rememberDialogKey() {
     if (dialogProvider !== 'local') dialogKeys[dialogProvider] = $('ai-api-key').value;
   }
@@ -452,6 +580,7 @@ Call to action: ${safeBrief.cta}`;
     const saved = persistSettings();
     if (saved) {
       $('ai-write-status').textContent = 'AI helper settings saved on this browser.';
+      $('ai-post-status').textContent = 'AI helper settings saved. Tap Write the post when the flyer is ready.';
       closeSettings();
     } else {
       $('ai-settings-status').textContent = 'Settings are ready for this tab only. Keep this page open to use them.';
@@ -546,11 +675,20 @@ Call to action: ${safeBrief.cta}`;
   $('ai-forget-confirm-yes').addEventListener('click', forgetKey);
   $('ai-write-button').addEventListener('click', writeForMe);
   $('ai-cancel-button').addEventListener('click', () => cancelRequest('write'));
+  $('ai-post-button').addEventListener('click', writePost);
+  $('ai-post-cancel-button').addEventListener('click', () => cancelRequest('post'));
+  document.querySelectorAll('[data-ai-copy]').forEach(button => button.addEventListener('click', () => copyPostField(button.dataset.aiCopy)));
+  for (const id of ['ai-instagram-caption', 'ai-hashtags', 'ai-facebook-description']) $(id).addEventListener('input', updatePostCounts);
+  for (const eventName of ['input', 'change', 'factory:briefapplied']) $('brief').addEventListener(eventName, updatePostReadiness);
   $('ai-undo').addEventListener('click', undo);
   for (const field of Object.keys(FIELD_LIMITS)) $(field).addEventListener('input', () => {
     undoValues = null;
     $('ai-undo').hidden = true;
   });
+  updatePostReadiness();
+  $('ai-instagram-caption').maxLength = POST_LIMITS.instagramCaption;
+  $('ai-facebook-description').maxLength = POST_LIMITS.facebookDescription;
+  updatePostCounts();
 
-  window.factoryAI = Object.freeze({PROVIDERS, BRAND_VOICE, openSettings, parseSuggestion});
+  window.factoryAI = Object.freeze({PROVIDERS, BRAND_VOICE, POST_LIMITS, openSettings, parseSuggestion, parsePost});
 })();
