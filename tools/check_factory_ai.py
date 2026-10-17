@@ -52,6 +52,13 @@ def check_ai(chrome, output_dir):
     calls, console, errors, held = [], [], [], []
     mock = {'provider': 'gemini', 'mode': 'success', 'text': None}
 
+    def resize(page, width, height):
+        # The flyer preview rescales from resize/ResizeObserver callbacks after
+        # the viewport changes, which shifts everything below it. Wait two
+        # frames so layout assertions measure the settled page, not a race.
+        page.set_viewport_size({'width': width, 'height': height})
+        page.evaluate('() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))')
+
     def response(text):
         if mock['provider'] == 'gemini':
             return {'candidates': [{'content': {'parts': [{'text': text}]}, 'finishReason': 'STOP'}]}
@@ -244,7 +251,7 @@ def check_ai(chrome, output_dir):
             voice = page.evaluate('factoryAI.BRAND_VOICE')
             assert voice in system
             for rule in ('instagram_caption', 'hashtags', 'facebook_description', '2200', '125',
-                         '8', '1000', '5000', 'no emoji', 'date, time and address exactly'):
+                         'Return no more than 8 relevant hashtags', '1000', '5000', 'no emoji', 'date, time and address exactly'):
                 assert rule.lower() in system.lower(), f'Missing post rule: {rule}'
 
         try:
@@ -357,16 +364,42 @@ def check_ai(chrome, output_dir):
                     }
                     assert values() == before, 'Post generation changed the flyer brief'
                     expect(page.locator('#ai-post-results')).to_be_visible()
+                    # Reject empty and partially empty replies atomically, even
+                    # after Mark has edited all three boxes. Exercise each adapter.
+                    page.locator('#ai-instagram-caption').fill('My edited caption')
+                    page.locator('#ai-hashtags').fill('#MyEditedTag')
+                    page.locator('#ai-facebook-description').fill('My edited description')
+                    edited_post = post_values()
+                    for caption, description in (('', ''), (' \t\n', ' \n\t'),
+                                                  ('', 'Usable description'), ('Usable caption', ''),
+                                                  (' \t', 'Usable description'), ('Usable caption', '\n ')):
+                        count_before = len(calls)
+                        post(text=json.dumps({'instagram_caption': caption, 'hashtags': [],
+                                              'facebook_description': description}))
+                        wait_post_done()
+                        expect(page.locator('#ai-post-status')).to_contain_text('empty caption or description')
+                        expect(page.locator('#ai-post-status')).to_contain_text('earlier post is unchanged')
+                        expect(page.locator('#ai-post-results')).to_be_visible()
+                        assert post_values() == edited_post
+                        assert len(calls) == count_before + 1
+                        assert values() == before
+                    post(text=json.dumps(dict(POST_RESULT, hashtags=[]))); wait_post_done()
+                    expect(page.locator('#ai-post-status')).to_contain_text('Your post is ready')
+                    expect(page.locator('#ai-hashtags')).to_have_value('')
                 leak_check()
                 print(f'PASS AI card A {provider}: key guidance, one request, 3 labelled choices, per-version/field apply and Undo')
                 if provider in ('gemini', 'openai', 'claude'):
-                    print(f'PASS AI card B {provider}: one request, native response shape, task schema, voice and private-field exclusion')
+                    print(f'PASS AI card B {provider}: native shape, schema, privacy, blank/partial reply rejection, edited-copy preservation and recovery')
 
             for width, height in ((1440, 1200), (390, 844)):
-                page.set_viewport_size({'width': width, 'height': height})
-                boxes = [card.bounding_box() for card in page.locator('[data-ai-version]').all()]
+                resize(page, width, height)
+                # Measure all cards in one layout snapshot so a late reflow
+                # cannot land between them.
+                boxes = page.locator('[data-ai-version]').evaluate_all(
+                    'cards => cards.map(c => { const r = c.getBoundingClientRect(); return {x: r.x, y: r.y}; })')
+                assert len(boxes) == 3, f'Expected 3 version cards, got {len(boxes)}'
                 if width == 1440:
-                    assert max(b['y'] for b in boxes) - min(b['y'] for b in boxes) < 2, 'Versions not side by side'
+                    assert max(b['y'] for b in boxes) - min(b['y'] for b in boxes) < 2, f'Versions not side by side: {boxes}'
                     assert boxes[0]['x'] < boxes[1]['x'] < boxes[2]['x']
                 else:
                     assert boxes[0]['y'] < boxes[1]['y'] < boxes[2]['y'], 'Versions not stacked on phone'
@@ -399,7 +432,8 @@ def check_ai(chrome, output_dir):
             assert tags == ['#CultureShyft', '#Detroit', '#one', '#two', '#three', '#four', '#five', '#six']
             assert all(re.fullmatch(r'#[A-Za-z0-9]+', tag) for tag in tags)
             expect(page.locator('#ai-instagram-count')).to_have_text('2,200 / 2,200 characters')
-            expect(page.locator('#ai-facebook-count')).to_have_text('5,000 / 5,000 characters')
+            expect(page.locator('#ai-facebook-count')).to_have_text('5,000 / 5,000 characters · Aim for 1,000 or fewer')
+            expect(page.locator('#ai-instagram-hook')).to_have_text('Hook preview (first 125 characters): ' + 'A' * 125)
             expect(page.locator('#ai-hashtags-count')).to_contain_text('8 / 8 hashtags')
             bounded = page.evaluate('''limits => factoryAI.parsePost(JSON.stringify({
               instagram_caption: 'word '.repeat(420) + 'Stop. ' + 'tail '.repeat(100),
@@ -409,12 +443,18 @@ def check_ai(chrome, output_dir):
             assert len(bounded['instagramCaption']) <= limits['instagramCaption']
             assert bounded['facebookDescription'].endswith('word')
             assert len(bounded['facebookDescription']) <= limits['facebookDescription']
+            exact_word = 'a' * (limits['instagramCaption'] - 5) + ' word'
+            exact_post = page.evaluate('''text => factoryAI.parsePost(JSON.stringify({
+              instagram_caption: text + ' more', hashtags: [], facebook_description: 'Valid description'
+            }))''', exact_word)
+            assert exact_post['instagramCaption'] == exact_word, 'Dropped a complete word exactly at the cap'
             print('PASS AI card B: fenced parser, sentence/word boundaries, hard caps including off-by-one, 8 cleaned de-duplicated hashtags')
 
             # The boxes are editable for this page, counts stay live, and both
             # clipboard paths copy only normalized plain text.
             page.locator('#ai-instagram-caption').fill('Five')
             expect(page.locator('#ai-instagram-count')).to_have_text('4 / 2,200 characters')
+            expect(page.locator('#ai-instagram-hook')).to_have_text('Hook preview (first 125 characters): Five')
             page.evaluate('''() => Object.defineProperty(navigator, 'clipboard', {configurable: true,
               value: {writeText: async text => { window.__copiedText = text; }}})''')
             page.locator('[data-ai-copy="ai-instagram-caption"]').click()
@@ -438,18 +478,29 @@ def check_ai(chrome, output_dir):
             page.locator('[data-ai-copy="ai-facebook-description"]').click()
             expect(page.locator('#ai-facebook-copy-status')).to_have_text('Copied')
             assert page.evaluate('window.__fallbackText') == 'Fallback copy'
-            print('PASS AI card B: editable live counts, direct clipboard and select-and-copy fallback with confirmation')
+            for failure in ('false', 'throw'):
+                page.evaluate('''failure => {
+                  document.execCommand = () => {
+                    if (failure === 'throw') throw new Error('Copy blocked');
+                    return false;
+                  };
+                }''', failure)
+                page.locator('[data-ai-copy="ai-facebook-description"]').click()
+                expect(page.locator('#ai-facebook-copy-status')).to_have_text('Text selected. Use Copy in your browser.')
+                expect(page.locator('#ai-facebook-description')).to_be_focused()
+                assert page.locator('#ai-facebook-description').evaluate('e => e.value.slice(e.selectionStart, e.selectionEnd)') == 'Fallback copy'
+            print('PASS AI card B: live counts/hook, clipboard success and blocked fallback recovery with selected text')
 
             # Hostile output remains text. Failed regeneration, provider errors,
             # cancellation and the real 30-second timeout preserve prior results.
             markup = '<script>window.__postHostile=1</script><img src=x onerror="window.__postHostile=1">'
             script_count = page.locator('script').count()
             echoed = {'instagram_caption': 'Echo ' + FAKE_KEY + ' ' + UNKNOWN_KEYS[0],
-                      'hashtags': [FAKE_KEY, UNKNOWN_KEYS[0]],
+                      'hashtags': [FAKE_KEY, '#Prefix' + UNKNOWN_KEYS[0], '#Safe'],
                       'facebook_description': 'Echo ' + FAKE_KEY + ' ' + UNKNOWN_KEYS[0]}
             post(text=json.dumps(echoed)); wait_post_done()
             expect(page.locator('#ai-instagram-caption')).to_have_value('Echo [key removed] [key removed]')
-            expect(page.locator('#ai-hashtags')).to_have_value('#keyremoved')
+            expect(page.locator('#ai-hashtags')).to_have_value('#Safe')
             expect(page.locator('#ai-facebook-description')).to_have_value('Echo [key removed] [key removed]')
             assert FAKE_KEY not in page.content() and UNKNOWN_KEYS[0] not in page.content()
             assert FAKE_KEY not in json.dumps(post_values()) and UNKNOWN_KEYS[0] not in json.dumps(post_values())
@@ -477,7 +528,13 @@ def check_ai(chrome, output_dir):
             # Post copy never enters brief collection, autosave, saved flyers or
             # export, and a second page in the same browser starts with no post.
             assert 'SESSION_ONLY_MARKER' not in json.dumps(values())
-            page.wait_for_timeout(400)
+            page.locator('#save-brief').click()
+            saved_headline = page.locator('#headline').input_value()
+            page.locator('#headline').fill('Autosave isolation check')
+            page.wait_for_function('''() => JSON.parse(localStorage.getItem('cultureshyft.factory.draft.v1'))
+              .payload.values.headline === 'Autosave isolation check' ''')
+            assert page.evaluate('''() => JSON.parse(localStorage.getItem('cultureshyft.factory.briefs.v1'))
+              .some(entry => entry.payload.values.headline === 'Autosave isolation check')''')
             non_ai_storage = page.evaluate('''() => Object.fromEntries(Object.keys(localStorage)
               .filter(k => k !== 'cultureshyft.factory.ai.v1').map(k => [k, localStorage.getItem(k)]))''')
             assert 'SESSION_ONLY_MARKER' not in json.dumps(non_ai_storage)
@@ -486,6 +543,7 @@ def check_ai(chrome, output_dir):
             post_export_path = output_dir / 'post-isolation-brief.json'
             post_export.value.save_as(str(post_export_path))
             assert 'SESSION_ONLY_MARKER' not in post_export_path.read_text(encoding='utf-8')
+            page.locator('#headline').fill(saved_headline)
             fresh = context.new_page()
             fresh.goto(checks.FACTORY_PAGE.as_uri())
             fresh.evaluate('() => window.factoryReady')
@@ -493,8 +551,8 @@ def check_ai(chrome, output_dir):
             for selector in ('#ai-instagram-caption', '#ai-hashtags', '#ai-facebook-description'):
                 expect(fresh.locator(selector)).to_have_value('')
             fresh.close()
-            for width, height in ((1440, 1200), (390, 844)):
-                page.set_viewport_size({'width': width, 'height': height})
+            for width, height in ((1440, 1200), (1024, 1366), (390, 844)):
+                resize(page, width, height)
                 assert page.locator('.ai-post').evaluate('e => e.scrollWidth <= e.clientWidth + 1')
                 for button in page.locator('.ai-post button').all():
                     if button.is_visible(): assert button.bounding_box()['height'] >= 44
@@ -716,7 +774,7 @@ def check_ai(chrome, output_dir):
             # Dialog keyboard containment and touch layout at iPad and narrow phone widths.
             open_settings()
             for width, height in ((1024, 1366), (390, 844)):
-                page.set_viewport_size({'width': width, 'height': height})
+                resize(page, width, height)
                 for selector in ('#ai-provider', '#ai-api-key', '#ai-show-key', '#ai-test-connection', '#ai-save-settings'):
                     box = page.locator(selector).bounding_box()
                     assert box and box['height'] >= 44 and box['width'] >= 44, selector

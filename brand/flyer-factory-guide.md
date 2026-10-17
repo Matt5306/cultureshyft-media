@@ -52,7 +52,9 @@ AI is optional and only available in the factory. Customers see no AI controls o
 
 When the flyer has both its required headline and contact line, **Write the post** becomes available under the social-image downloads. One tap sends the headline, subheadline, date, place, body and call to action to the provider and returns an Instagram caption, up to 8 cleaned hashtags and a Facebook event description. The contact line only unlocks the button; it is never sent. Check that dates, times and addresses match the flyer exactly. Each result box shows its live character count and can be edited for this open page. Tap the **Copy** button under a box to copy only that box; **Copied** confirms success. If browser copying is blocked, the text stays selected so you can use the device’s Copy command. These post results are temporary: they are not added to saved flyers, autosave or exported brief JSON.
 
-While either writing request is running, tap its **Cancel** button to stop waiting. A failed, cancelled or timed-out post request leaves the last successful post on screen. There is no automatic retry.
+The hook preview shows the first 125 characters of your Instagram caption as you edit. Put the main reason to read there. For Facebook, aim for 1,000 characters or fewer; the hard limit is 5,000. Hashtags containing an API key are dropped.
+
+While either writing request is running, tap its **Cancel** button to stop waiting. A failed, cancelled or timed-out post request leaves the last successful post and your edits on screen. A reply with an empty caption or description is rejected without replacing any box. There is no automatic retry.
 
 Every writing request includes the shared CultureShyft voice rules and the exact tagline, “Media made to move people.” AI can still make mistakes; check the result. If a reply has only 1 or 2 usable versions, the panel tells you and shows those choices. You can use one or tap **Write it for me** again. Failed or cancelled requests preserve your flyer and earlier choices; there is no automatic retry. Unaccepted versions stay only in this open page and disappear on reload.
 

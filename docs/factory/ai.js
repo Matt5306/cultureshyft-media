@@ -271,6 +271,7 @@ Use no emoji by default. Use no exclamation marks in body copy. Copy every suppl
     if (code === 'model_invalid') return 'That model name is not safe to use. Copy only the model name from your provider.';
     if (code === 'base_invalid') return 'Enter the Local AI base URL without a key, query, or # section. Use http://localhost:1234/v1 for LM Studio or http://localhost:11434/v1 for Ollama.';
     if (code === 'blocked') return `${label} blocked the content or returned no usable text. Remove sensitive details and try again.`;
+    if (code === 'empty_post') return `${label} returned an empty caption or description. Your earlier post is unchanged. Try again or choose another model.`;
     if (code === 'malformed_response' || code === 'invalid_json') return `${label} answered, but the answer was not valid JSON. Try again or choose another model.`;
     if (code === 'http') {
       if (error.status === 400 || error.status === 401) return config?.provider === 'gemini' ? 'Gemini did not accept that key. Open Google AI Studio, make a new key, paste it here.' : `${label} did not accept that key. Make a new key in your provider account, then paste it here.`;
@@ -325,6 +326,7 @@ Use no emoji by default. Use no exclamation marks in body copy. Copy every suppl
     let sentenceEnd = -1;
     for (const match of candidate.matchAll(/[.!?](?=\s|$)/g)) sentenceEnd = match.index + 1;
     if (sentenceEnd >= Math.floor(limit / 2)) return candidate.slice(0, sentenceEnd).trim();
+    if (/\s/.test(text[limit])) return candidate.trim();
     const wordEnd = candidate.search(/\s+\S*$/);
     return (wordEnd > 0 ? candidate.slice(0, wordEnd) : candidate.slice(0, limit)).trim();
   }
@@ -333,7 +335,9 @@ Use no emoji by default. Use no exclamation marks in body copy. Copy every suppl
     const seen = new Set();
     for (const value of values) {
       if (typeof value !== 'string') continue;
-      const word = scrubSuggestion(value, config).replace(/[^A-Za-z0-9]/g, '');
+      const scrubbed = scrubSuggestion(value, config);
+      if (scrubbed !== value.trim()) continue;
+      const word = scrubbed.replace(/[^A-Za-z0-9]/g, '');
       const normalized = word.toLowerCase();
       if (!word || seen.has(normalized)) continue;
       seen.add(normalized);
@@ -345,11 +349,13 @@ Use no emoji by default. Use no exclamation marks in body copy. Copy every suppl
   function parsePost(raw, config) {
     const parsed = parseJSONObject(raw);
     if (typeof parsed.instagram_caption !== 'string' || !Array.isArray(parsed.hashtags) || typeof parsed.facebook_description !== 'string') throw new AIError('invalid_json');
-    return {
+    const post = {
       instagramCaption: trimAtBoundary(scrubSuggestion(parsed.instagram_caption, config), POST_LIMITS.instagramCaption),
       hashtags: normalizeHashtags(parsed.hashtags, config),
       facebookDescription: trimAtBoundary(scrubSuggestion(parsed.facebook_description, config), POST_LIMITS.facebookDescription)
     };
+    if (!post.instagramCaption || !post.facebookDescription) throw new AIError('empty_post');
+    return post;
   }
 
   function briefSnapshot() {
@@ -458,8 +464,9 @@ Call to action: ${safeBrief.cta}`;
   }
   function updatePostCounts() {
     $('ai-instagram-count').textContent = `${$('ai-instagram-caption').value.length.toLocaleString()} / ${POST_LIMITS.instagramCaption.toLocaleString()} characters`;
+    $('ai-instagram-hook').textContent = `Hook preview (first ${POST_LIMITS.instagramHook} characters): ${$('ai-instagram-caption').value.slice(0, POST_LIMITS.instagramHook)}`;
     $('ai-hashtags-count').textContent = `${$('ai-hashtags').value.length.toLocaleString()} characters · ${hashtagCount($('ai-hashtags').value)} / ${POST_LIMITS.hashtags} hashtags`;
-    $('ai-facebook-count').textContent = `${$('ai-facebook-description').value.length.toLocaleString()} / ${POST_LIMITS.facebookDescription.toLocaleString()} characters`;
+    $('ai-facebook-count').textContent = `${$('ai-facebook-description').value.length.toLocaleString()} / ${POST_LIMITS.facebookDescription.toLocaleString()} characters · Aim for ${POST_LIMITS.facebookAim.toLocaleString()} or fewer`;
   }
   function renderPost(post) {
     $('ai-instagram-caption').value = post.instagramCaption;
