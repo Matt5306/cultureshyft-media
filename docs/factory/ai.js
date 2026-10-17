@@ -297,7 +297,7 @@ Call to action: ${safeBrief.cta}`;
       row.append(heading, current, suggested, use); list.append(row);
     }
     $('ai-suggestions').hidden = false;
-    $('ai-undo').hidden = true;
+    $('ai-undo').hidden = !undoValues;
   }
   function setField(field, value) {
     $(field).value = String(value).slice(0, FIELD_LIMITS[field]);
@@ -305,8 +305,9 @@ Call to action: ${safeBrief.cta}`;
   }
   function applySuggestion(fields) {
     if (!suggestions) return;
-    undoValues = briefSnapshot();
+    const previous = briefSnapshot();
     fields.forEach(field => setField(field, suggestions[field]));
+    undoValues = previous;
     $('ai-undo').hidden = false;
     $('ai-write-status').textContent = fields.length === 1 ? 'Suggestion used. Check it in the flyer. Undo is available.' : 'Suggestions used. Check every detail in the flyer. Undo is available.';
   }
@@ -332,7 +333,6 @@ Call to action: ${safeBrief.cta}`;
       const raw = await withRequest('write', signal => callProvider(config, generationPrompts(snapshot), signal));
       suggestions = parseSuggestion(raw, config);
       suggestionSnapshot = snapshot;
-      undoValues = null;
       renderSuggestions();
       $('ai-write-status').textContent = 'Suggestion ready. Compare it with your text, then choose what to use.';
     } catch (error) {
@@ -413,19 +413,53 @@ Call to action: ${safeBrief.cta}`;
   }
   function forgetKey() {
     const provider = $('ai-provider').value;
-    delete dialogKeys[provider]; delete settings.keys[provider];
+    const targets = new Set([$('ai-api-key').value.trim(), dialogKeys[provider], settings.keys[provider]].filter(Boolean));
+    const stores = [];
+    const blocked = [];
+    const reset = [];
+    // Read both owned settings records before deleting: a stored copy can differ
+    // from the current dialog or memory (for example after an unsaved edit).
+    for (const name of ['localStorage', 'sessionStorage']) {
+      try {
+        const storage = window[name];
+        const raw = storage.getItem(STORAGE_KEY);
+        const saved = raw ? JSON.parse(raw) : null;
+        if (saved && (!saved.keys || typeof saved.keys !== 'object' || Array.isArray(saved.keys))) throw new Error('invalid');
+        if (saved?.keys[provider]) targets.add(saved.keys[provider]);
+        stores.push({name, storage, saved});
+      } catch (_) {
+        try { window[name].removeItem(STORAGE_KEY); reset.push(name); }
+        catch (_) { blocked.push(name); }
+      }
+    }
+    const removed = new Set();
+    function removeCopies(keys) {
+      for (const [slot, key] of Object.entries(keys)) {
+        if (slot === provider || targets.has(key)) {
+          if (key) removed.add(PROVIDERS[slot]?.label || slot);
+          delete keys[slot];
+        }
+      }
+    }
+    cancelRequest();
+    removeCopies(dialogKeys);
+    removeCopies(settings.keys);
     $('ai-api-key').value = '';
-    const persisted = persistSettings();
-    let removedAll = false;
-    let removalBlocked = false;
-    if (!persisted) {
-      try { localStorage.removeItem(STORAGE_KEY); removedAll = true; }
-      catch (_) { removalBlocked = true; }
+    for (const {name, storage, saved} of stores) {
+      if (!saved) continue;
+      removeCopies(saved.keys);
+      try { storage.setItem(STORAGE_KEY, JSON.stringify(saved)); }
+      catch (_) {
+        try { storage.removeItem(STORAGE_KEY); reset.push(name); }
+        catch (_) { blocked.push(name); }
+      }
     }
     $('ai-forget-confirm').hidden = true;
-    if (persisted) $('ai-settings-status').textContent = `${PROVIDERS[provider].label} key forgotten on this browser.`;
-    else if (removedAll) $('ai-settings-status').textContent = 'Browser storage would not update, so all saved AI settings were removed to make sure that key is gone. Settings in this open tab remain available.';
-    else if (removalBlocked) $('ai-settings-status').textContent = 'The key is removed from this open tab, but browser storage blocked the removal. Your flyers are unchanged. Revoke the key with your provider; export your flyers and invoices before clearing this site’s browser data.';
+    const slots = [...removed].join(', ') || PROVIDERS[provider].label;
+    let message = `Key forgotten from ${slots} in this tab's memory and local/session storage. All matching provider copies were removed.`;
+    if (reset.length) message += ` ${reset.join(' and ')} would not update, so its saved AI settings were removed. Other settings in this open tab remain available.`;
+    if (blocked.length) message = `Key removed from this tab's memory (${slots}), but ${blocked.join(' and ')} blocked removal. Your flyers are unchanged. Revoke the key with your provider; export your flyers and invoices before clearing this site's browser data.`;
+    $('ai-settings-status').textContent = message;
   }
 
   $('open-ai-settings').addEventListener('click', event => openSettings(event.currentTarget));
@@ -447,6 +481,10 @@ Call to action: ${safeBrief.cta}`;
   $('ai-cancel-button').addEventListener('click', () => cancelRequest('write'));
   $('ai-use-all').addEventListener('click', () => applySuggestion(Object.keys(FIELD_LIMITS)));
   $('ai-undo').addEventListener('click', undo);
+  for (const field of Object.keys(FIELD_LIMITS)) $(field).addEventListener('input', () => {
+    undoValues = null;
+    $('ai-undo').hidden = true;
+  });
 
   window.factoryAI = Object.freeze({PROVIDERS, openSettings, parseSuggestion});
 })();

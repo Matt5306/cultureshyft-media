@@ -13,6 +13,8 @@ import uuid
 
 AI_KEY = 'cultureshyft.factory.ai.v1'
 FAKE_KEY = 'sk-' + 'TEST' + 'FAKE' * 8  # built at runtime so the secret scanner never sees a key-shaped literal
+UNKNOWN_KEYS = tuple(prefix + 'UNKNOWN' + 'TEST' * 8
+                     for prefix in ('AIza', 'sk-', 'sk-proj-', 'sk-ant-', 'sk-or-'))
 FIELDS = ('headline', 'subheadline', 'body', 'cta')
 SUGGESTION = dict(zip(FIELDS, ('Meet your neighbors.', 'Make room for connection.',
                              'Local makers. Good food. Everyone is welcome.', 'Come through.')))
@@ -58,7 +60,7 @@ def check_ai(chrome, output_dir):
             held.append(route)
         elif isinstance(mode, int):
             route.fulfill(status=mode, content_type='application/json', body=json.dumps({
-                'error': {'message': 'API key not valid ' + FAKE_KEY + ' AIzaSyTESTONLY0123456789abcdef0123456789', 'code': mode}}))
+                'error': {'message': 'API key not valid ' + FAKE_KEY + ' ' + UNKNOWN_KEYS[0], 'code': mode}}))
         elif mode == 'blocked':
             route.fulfill(json={'promptFeedback': {'blockReason': 'SAFETY'}, 'candidates': []})
         elif mode == 'empty':
@@ -248,6 +250,40 @@ def check_ai(chrome, output_dir):
             leak_check()
             print('PASS AI: per-field/all acceptance, exact Undo, autosave, exported/saved/draft key isolation')
 
+            # A arrives first; accept A while B is pending. B must preserve Undo.
+            suggestion_b = {field: 'Second suggestion ' + field for field in FIELDS}
+            write('hold')
+            expect(page.locator('#ai-write-button')).to_contain_text('Working')
+            page.locator('[data-ai-use="headline"]').click()
+            assert values() == {**before, 'headline': SUGGESTION['headline']}
+            held.pop().fulfill(json=response(json.dumps(suggestion_b)))
+            wait_done()
+            expect(page.locator('#ai-undo')).to_be_visible()
+            page.locator('#ai-undo').click()
+            assert values() == before
+            # A later reply also preserves an already-established Undo snapshot.
+            page.locator('#ai-use-all').click()
+            write(); wait_done()
+            expect(page.locator('#ai-undo')).to_be_visible()
+            page.locator('#ai-undo').click()
+            assert values() == before
+            # Another acceptance replaces the snapshot; editing copy invalidates it.
+            page.locator('[data-ai-use="headline"]').click()
+            page.locator('[data-ai-use="body"]').click()
+            page.locator('#ai-undo').click()
+            assert values() == {**before, 'headline': SUGGESTION['headline']}
+            page.locator('#headline').fill(before['headline'])
+            for field in FIELDS:
+                page.locator('#ai-use-all').click()
+                page.locator('#' + field).fill('Manual edit')
+                expect(page.locator('#ai-undo')).to_be_hidden()
+                edited = values()
+                page.locator('#ai-undo').dispatch_event('click')
+                assert values() == edited, 'Stale Undo overwrote a manual edit'
+                for name in FIELDS:
+                    page.locator('#' + name).fill(before[name])
+            print('PASS AI: Undo survives in-flight acceptance and new replies, replaced on acceptance, cleared on edits')
+
             # Every adapter gets bad key, quota, offline, malformed output, cancellation and timeout.
             for provider in ('gemini', 'openai', 'claude'):
                 choose(provider); save_settings()
@@ -292,12 +328,56 @@ def check_ai(chrome, output_dir):
             write(text=json.dumps(long_text)); wait_done()
             for field, limit in zip(FIELDS, (140, 180, 450, 100)):
                 assert len(page.locator(f'[data-ai-field="{field}"] .ai-suggested').text_content()) == limit
-            # Provider echo and markup must never leak a key or execute as HTML.
-            hostile = {**SUGGESTION, 'headline': '<img src=x onerror=alert(1)>', 'body': 'Echo ' + FAKE_KEY}
+            # Unknown keys exercise regex redaction, independently of exact-key removal.
+            for unknown in UNKNOWN_KEYS:
+                assert unknown != FAKE_KEY
+                write(text=json.dumps({field: 'Echo ' + unknown for field in FIELDS})); wait_done()
+                for field in FIELDS:
+                    expect(page.locator(f'[data-ai-field="{field}"] .ai-suggested')).to_have_text('Echo [key removed]')
+                    page.locator(f'[data-ai-use="{field}"]').click()
+                    expect(page.locator('#' + field)).to_have_value('Echo [key removed]')
+                    page.locator('#ai-undo').click()
+                    assert values() == before
+                page.locator('#ai-use-all').click()
+                page.wait_for_function('''() => JSON.parse(localStorage.getItem('cultureshyft.factory.draft.v1'))
+                  .payload.values.cta === 'Echo [key removed]' ''')
+                page.locator('#save-brief').click()
+                with page.expect_download() as download:
+                    page.locator('#export-brief').click()
+                download.value.save_as(str(exported))
+                surfaces = page.content() + json.dumps(values()) + exported.read_text(encoding='utf-8')
+                surfaces += page.evaluate('JSON.stringify(localStorage) + JSON.stringify(sessionStorage)')
+                surfaces += '\n'.join(console + errors)
+                assert unknown not in surfaces, 'Unknown provider key escaped redaction'
+                page.locator('#ai-undo').click()
+                assert values() == before
+            print('PASS AI: unknown Gemini/OpenAI/project/Anthropic/OpenRouter keys redacted in all fields through acceptance/storage/export')
+
+            # Script and HTML in EVERY field stay text through individual/all acceptance.
+            markup = '<script>window.__aiHostile=1</script><img src=x onerror="window.__aiHostile=1">'
+            script_count = page.locator('script').count()
+            hostile = {field: markup + FAKE_KEY for field in FIELDS}
             write(text=json.dumps(hostile)); wait_done()
             leak_check()
-            assert page.locator('#ai-suggestions img').count() == 0
-            print('PASS AI Gemini: 403/404/5xx, empty/blocked, fences, maxlengths, key echo and markup isolation')
+            for field in FIELDS:
+                expect(page.locator(f'[data-ai-field="{field}"] .ai-suggested')).to_have_text(markup + '[key removed]')
+                page.locator(f'[data-ai-use="{field}"]').click()
+                expect(page.locator('#' + field)).to_have_value(markup + '[key removed]')
+                assert page.locator('script').count() == script_count
+                assert page.locator('img[src="x"], [onerror]').count() == 0
+                assert page.evaluate('window.__aiHostile === undefined')
+                leak_check()
+                page.locator('#ai-undo').click()
+                assert values() == before
+            page.locator('#ai-use-all').click()
+            assert all(values()[field] == markup + '[key removed]' for field in FIELDS)
+            assert page.locator('script').count() == script_count
+            assert page.locator('img[src="x"], [onerror]').count() == 0
+            assert page.evaluate('window.__aiHostile === undefined')
+            leak_check()
+            page.locator('#ai-undo').click()
+            assert values() == before
+            print('PASS AI Gemini: errors, fences, maxlengths, configured key echo, script/HTML in every field through acceptance')
 
             # Dialog keyboard containment and touch layout at iPad and narrow phone widths.
             open_settings()
@@ -319,16 +399,40 @@ def check_ai(chrome, output_dir):
             expect(page.locator('#open-ai-settings')).to_be_focused()
             page.set_viewport_size({'width': 1024, 'height': 1366})
 
-            # Forget needs a real confirmation, removes only the selected provider key.
+            # Forget removes every matching slot in memory AND both storage types.
+            page.evaluate('''k => {
+              const saved = JSON.parse(localStorage.getItem(k));
+              saved.keys.local = saved.keys.gemini;
+              localStorage.setItem(k, JSON.stringify(saved));
+              sessionStorage.setItem(k, localStorage.getItem(k));
+              sessionStorage.setItem('ai-unrelated-test', 'keep me');
+            }''', AI_KEY)
+            page.reload(); ready()
             open_settings()
             page.locator('#ai-forget-key').click()
             assert FAKE_KEY in page.evaluate('(k) => localStorage.getItem(k)', AI_KEY)
             page.locator('#ai-forget-confirm-yes').click()
-            stored = json.loads(page.evaluate('(k) => localStorage.getItem(k)', AI_KEY))
-            assert not stored['keys'].get('gemini')
-            assert stored['keys'].get('openai') == FAKE_KEY
+            expect(page.locator('#ai-settings-status')).to_contain_text('All matching provider copies were removed')
+            for label in ('Gemini', 'OpenAI', 'Claude', 'OpenRouter', 'Local AI'):
+                expect(page.locator('#ai-settings-status')).to_contain_text(label)
+            for storage in ('localStorage', 'sessionStorage'):
+                stored = json.loads(page.evaluate(f'(k) => {storage}.getItem(k)', AI_KEY))
+                assert FAKE_KEY not in json.dumps(stored)
+                assert not any(stored['keys'].values())
+            assert page.evaluate("sessionStorage.getItem('ai-unrelated-test')") == 'keep me'
             expect(page.locator('#ai-api-key')).to_have_value('')
+            for provider in ('openai', 'claude', 'openrouter', 'gemini'):
+                page.locator('#ai-provider').select_option(provider)
+                expect(page.locator('#ai-api-key')).to_have_value('')
+            # Reopening copies settings memory back into dialog memory; saving
+            # must not resurrect a forgotten copy in another provider slot.
             page.keyboard.press('Escape')
+            open_settings()
+            for provider in ('openai', 'claude', 'openrouter', 'gemini'):
+                page.locator('#ai-provider').select_option(provider)
+                expect(page.locator('#ai-api-key')).to_have_value('')
+            save_settings()
+            assert FAKE_KEY not in page.evaluate('(k) => localStorage.getItem(k)', AI_KEY)
             count = len(calls)
             page.reload(); ready()
             assert len(calls) == count
@@ -336,6 +440,26 @@ def check_ai(chrome, output_dir):
             expect(page.locator('#ai-settings-dialog')).to_be_visible()
             page.keyboard.press('Escape')
             print('PASS AI: accessible modal/touch targets, forget confirmation and reload recovery')
+
+            # Distinct credentials are preserved; unsaved dialog copies are forgotten.
+            choose('gemini'); save_settings()
+            choose('claude')
+            distinct_key = 'different-' + 'TEST' * 8
+            page.locator('#ai-api-key').fill(distinct_key)
+            save_settings()
+            choose('openai')  # unsaved copy in the dialog only
+            page.locator('#ai-provider').select_option('gemini')
+            page.locator('#ai-forget-key').click()
+            page.locator('#ai-forget-confirm-yes').click()
+            page.locator('#ai-provider').select_option('openai')
+            expect(page.locator('#ai-api-key')).to_have_value('')
+            page.locator('#ai-provider').select_option('claude')
+            expect(page.locator('#ai-api-key')).to_have_value(distinct_key)
+            stored = json.loads(page.evaluate('(k) => localStorage.getItem(k)', AI_KEY))
+            assert FAKE_KEY not in json.dumps(stored)
+            assert stored['keys']['claude'] == distinct_key
+            page.keyboard.press('Escape')
+            print('PASS AI: forget clears unsaved matching copies and preserves distinct provider keys')
 
             # Local failures explain exact server fixes, with no cloud key attached.
             choose('local'); save_settings()
@@ -417,6 +541,51 @@ def check_ai(chrome, output_dir):
                 leak_check()
                 page.close(); page = main_page
                 print(f'PASS AI: {failure} storage, session fallback, warning, usable generation')
+
+            # Failed storage updates must fall back to removal, or report failure
+            # honestly while still clearing all in-memory copies.
+            page.goto(checks.FACTORY_PAGE.as_uri()); ready()
+            for failure in ('write-fails', 'removal-blocked'):
+                choose('gemini'); save_settings()
+                choose('openai'); save_settings()
+                page.evaluate('''({k, blocked}) => {
+                  sessionStorage.setItem(k, localStorage.getItem(k));
+                  window.aiOriginalSet = Storage.prototype.setItem;
+                  window.aiOriginalRemove = Storage.prototype.removeItem;
+                  Storage.prototype.setItem = function(key, value) {
+                    if (key === k) throw new DOMException('full', 'QuotaExceededError');
+                    return window.aiOriginalSet.call(this, key, value);
+                  };
+                  Storage.prototype.removeItem = function(key) {
+                    if (key === k && blocked) throw new DOMException('blocked', 'SecurityError');
+                    return window.aiOriginalRemove.call(this, key);
+                  };
+                }''', {'k': AI_KEY, 'blocked': failure == 'removal-blocked'})
+                open_settings()
+                page.locator('#ai-forget-key').click()
+                page.locator('#ai-forget-confirm-yes').click()
+                expected = 'blocked removal' if failure == 'removal-blocked' else 'saved AI settings were removed'
+                expect(page.locator('#ai-settings-status')).to_contain_text(expected)
+                for storage in ('localStorage', 'sessionStorage'):
+                    saved = page.evaluate(f'(k) => {storage}.getItem(k)', AI_KEY)
+                    assert (FAKE_KEY in saved) if failure == 'removal-blocked' else saved is None
+                for provider in ('gemini', 'openai'):
+                    page.locator('#ai-provider').select_option(provider)
+                    expect(page.locator('#ai-api-key')).to_have_value('')
+                page.keyboard.press('Escape')
+                open_settings()
+                expect(page.locator('#ai-api-key')).to_have_value('')
+                page.keyboard.press('Escape')
+                page.evaluate('''() => {
+                  Storage.prototype.setItem = window.aiOriginalSet;
+                  Storage.prototype.removeItem = window.aiOriginalRemove;
+                }''')
+                # Clean up the deliberately retained fixture using the real UI.
+                open_settings()
+                page.locator('#ai-forget-key').click()
+                page.locator('#ai-forget-confirm-yes').click()
+                page.keyboard.press('Escape')
+                print(f'PASS AI: forget {failure}, memory cleared and storage outcome reported')
             assert not errors, errors
         except Exception as exc:
             raise checks.CheckFailure(f'AI helper: {exc}') from exc
