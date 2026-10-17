@@ -573,6 +573,24 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _check_spanish_units() -> None:
+    node = shutil.which("node")
+    if not node:
+        raise CheckFailure("Spanish unit checks require Node.js; no checks were skipped.")
+    for script in ("test_factory_spanish.js", "test_factory_spanish_store.js"):
+        try:
+            result = subprocess.run(
+                [node, str(ROOT / "tools" / script)], cwd=ROOT,
+                capture_output=True, text=True, encoding="utf-8", timeout=30,
+                creationflags=_creation_flags(), check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise CheckFailure(f"Spanish unit check {script} could not run: {exc}") from exc
+        if result.returncode:
+            raise CheckFailure(f"Spanish unit check {script} failed:\n{result.stdout}{result.stderr}")
+        print(result.stdout, end="")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     chrome = args.chrome.expanduser().resolve()
@@ -593,6 +611,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+    _check_spanish_units()
 
     if args.keep:
         _archive_kept_artifacts()

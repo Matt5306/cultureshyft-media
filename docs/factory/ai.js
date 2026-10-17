@@ -414,7 +414,37 @@ Maximum characters: headline 140, subheadline 180, body 450, cta 100, instagramC
     if (numbers(english) !== numbers(spanish)) warnings.push('Numbers changed or are missing. Check dates, times, phone numbers and prices against the English text.');
     const links = text => matches(text, /(?:https?:\/\/|www\.)[^\s<>"']+|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s<>"']*)?/gi).map(value => value.replace(/[.,;!?)]*$/, '')).sort().join('|');
     if (links(english) !== links(spanish)) warnings.push('A URL or email is missing or changed. Copy it exactly from the English text.');
-    const addresses = text => matches(text, /\b\d+[A-Za-z]?\s+(?:(?:N|S|E|W|North|South|East|West)\.?\s+)?(?:(?:[\p{L}.'’-]+|\d+(?:st|nd|rd|th))\s+){1,6}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Parkway|Pkwy|Highway|Hwy|Circle|Cir|Terrace|Ter)\b\.?/giu).sort().join('|');
+    const addresses = text => {
+      // A street never spans lines, so a following line cannot be swallowed
+      // into the street name.
+      const streets = /\b\d+[A-Za-z]?[ \t]+(?:(?:N|S|E|W|North|South|East|West)\.?[ \t]+)?(?:(?:[\p{L}.'’-]+|\d+(?:st|nd|rd|th))[ \t]+){1,6}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Parkway|Pkwy|Highway|Hwy|Circle|Cir|Terrace|Ter)\b\.?/giu;
+      // Unit and locality parts follow after a comma or on the next line
+      // (one line break, never a blank line).
+      const sep = String.raw`[ \t]*(?:,[ \t]*(?:\r?\n[ \t]*)?|\r?\n[ \t]*)`;
+      // Keep letter-only units too: the numeric check cannot catch Apt A -> B.
+      const unit = new RegExp(String.raw`^(?:${sep}|[ \t]*)(?:(?:Apartment|Apt|Unit|Suite|Ste|Floor|Fl|Building|Bldg)\b\.?[ \t]*|#[ \t]*)[\p{L}\d-]+\b`, 'iu');
+      // A locality part is a ZIP, or one to four Capitalized words (city,
+      // state, "St. Clair Shores") with an optional ZIP, and it must fill the
+      // whole comma or line segment. Lower-case prose ("bring a friend"),
+      // times ("7 PM"), day/month names and sentences that continue past a
+      // capital ("Jordan will meet you") are not address parts, so translating
+      // them never warns. Case-sensitive on purpose.
+      const name = String.raw`(?!(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Today|Tonight|Tomorrow|January|February|March|April|May|June|July|August|September|October|November|December)\b)\p{Lu}[\p{L}'’.-]*`;
+      const zip = String.raw`\d{5}(?:-\d{4})?`;
+      const place = String.raw`${name}(?:[ \t]+${name}){0,3}(?:[ \t]+${zip})?|${zip}`;
+      const segmentEnd = String.raw`(?=[ \t]*(?:[,;:!?)\]]|\.(?:\s|$)|\r?\n|$))`;
+      const locality = new RegExp(String.raw`^(?:${sep}(?:${place})${segmentEnd})+`, 'u');
+      return [...text.matchAll(streets)].map(street => {
+        let end = street.index + street[0].length;
+        const unitMatch = text.slice(end).match(unit);
+        if (unitMatch) end += unitMatch[0].length;
+        const localityMatch = text.slice(end).match(locality);
+        if (localityMatch) end += localityMatch[0].length;
+        // Line breaks versus spaces and a closing sentence period are layout,
+        // not address content.
+        return text.slice(street.index, end).replace(/\s+/g, ' ').replace(/\.$/, '');
+      }).sort().join('|');
+    };
     if (addresses(english) !== addresses(spanish)) warnings.push('An address is missing or changed. Copy the full address exactly from the English text.');
     for (const fixed of ['CultureShyft', 'Media made to move people.']) {
       if (english.includes(fixed) && !spanish.includes(fixed)) warnings.push(`Keep ${fixed} exactly as written in English.`);

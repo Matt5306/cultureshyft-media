@@ -129,6 +129,75 @@ for (const unsafe of [
 assert(verifySpanishPreservation(source.headline, 'Vecinos').some(message => /CultureShyft/.test(message)));
 assert(verifySpanishPreservation(source.subheadline, 'Medios que mueven a la gente.').some(message => /Media made/.test(message)));
 
+// Address-only mutations: no changed numbers, URLs or brand text can mask this.
+for (const address of [
+  '123 Main Street, Apt A, Detroit',
+  '123 Main St. Apt. A, Detroit, MI',
+  '123 Main Street Unit A, Detroit',
+  '123 Main Street, Suite A, Detroit',
+  '123 Main Street #A, Detroit',
+  '123 Main Street, Detroit, MI',
+  '123 Main Street, New York, NY 10001',
+  '123 Main Street, St. Clair Shores, MI',
+]) {
+  const english = `Meet at ${address}. Bring a friend.`;
+  const spanish = `Ven a ${address}. Trae a alguien.`;
+  assert.equal(verifySpanishPreservation(english, spanish).length, 0, address);
+  for (const changed of [
+    address.replace(/\bA\b/, 'B'),
+    address.replace('Detroit', 'Chicago').replace('New York', 'Los Angeles'),
+    address.replace('Clair Shores', 'Louis'),
+    address.replace(/, (?:Detroit|New York)/, ''),
+    address.replace(/,? (?:Apt\.?|Unit|Suite|#) ?A/, ''),
+    address.replace('MI', 'OH').replace('NY', 'CA'),
+  ].filter(value => value !== address)) {
+    const warnings = verifySpanishPreservation(english, `Ven a ${changed}. Trae a alguien.`);
+    assert.equal(warnings.length, 1, `Expected only an address warning: ${changed}`);
+    assert.match(warnings[0], /address/, changed);
+  }
+}
+
+// Unit and locality lines separated by line breaks are part of the address.
+for (const [english, changed] of [
+  ['123 Main Street\nApt A\nDetroit', '123 Main Street\nApt B\nChicago'],
+  ['123 Main Street\nApt A\nDetroit', '123 Main Street\nApt B\nDetroit'],
+  ['123 Main Street\nApt A\nDetroit', '123 Main Street\nApt A\nChicago'],
+  ['123 Main Street\nApt A\nDetroit', '123 Main Street\nDetroit'],
+  ['123 Main Street\nApt A\nDetroit', '123 Main Street\nApt A'],
+  ['Meet us:\n123 Main Street,\nDetroit, MI\nBring a friend.', 'Ven:\n123 Main Street,\nChicago, MI\nTrae a alguien.'],
+  ['Meet us:\n123 Main Street\nSuite A\nSt. Clair Shores, MI 48080', 'Ven:\n123 Main Street\nSuite A\nSt. Louis, MI 48080'],
+]) {
+  assert.equal(verifySpanishPreservation(english, english.replace('Meet us:', 'Ven:').replace('Bring a friend.', 'Trae a alguien.')).length, 0, `exact copy must not warn: ${english}`);
+  const warnings = verifySpanishPreservation(english, changed);
+  assert.equal(warnings.length, 1, `Expected only an address warning: ${JSON.stringify(changed)}`);
+  assert.match(warnings[0], /address/, changed);
+}
+// Ordinary prose after a comma or on the next line is not a locality, so
+// translating it must not raise a false address warning.
+for (const [english, spanish] of [
+  ['123 Main Street, bring a friend.', '123 Main Street, trae a un amigo.'],
+  ['Meet at 123 Main Street, then grab food.', 'Nos vemos en 123 Main Street, luego vamos a comer.'],
+  ['123 Main Street, 7 PM', '123 Main Street, 7 p. m.'],
+  ['Meet at 123 Main Street, 7 PM sharp.', 'Nos vemos en 123 Main Street, 7 p. m. en punto.'],
+  ['123 Main Street, Saturday.', '123 Main Street, sábado.'],
+  ['123 Main Street, Jordan will meet you.', '123 Main Street, Jordan te espera.'],
+  ['123 Main Street\nbring a friend', '123 Main Street\ntrae a un amigo'],
+  ['123 Main Street, Apt A, then grab food.', '123 Main Street, Apt A, luego vamos a comer.'],
+  ['123 Main Street, Detroit, then grab food.', '123 Main Street, Detroit, luego vamos a comer.'],
+]) {
+  assert.deepEqual(JSON.parse(JSON.stringify(verifySpanishPreservation(english, spanish))), [], `false address warning: ${JSON.stringify(spanish)}`);
+}
+// Comma-separated city, state and ZIP stay protected next to that prose.
+for (const [english, changed] of [
+  ['123 Main Street, Detroit, then grab food.', '123 Main Street, Chicago, luego vamos a comer.'],
+  ['123 Main Street, Detroit, MI 48226. Bring a friend.', '123 Main Street, Detroit, OH 48226. Trae a alguien.'],
+  ['123 Main Street, Apt A, then grab food.', '123 Main Street, Apt B, luego vamos a comer.'],
+]) {
+  const warnings = verifySpanishPreservation(english, changed);
+  assert.equal(warnings.length, 1, `Expected only an address warning: ${changed}`);
+  assert.match(warnings[0], /address/, changed);
+}
+
 assert(!aiSource.includes('.innerHTML'), 'AI output must never use innerHTML');
 assert(aiSource.includes('input.value = value'), 'Spanish output must be inserted as a text control value');
 assert(aiSource.includes('original.textContent = spanishPreview.source[field]'), 'English comparison must use textContent');

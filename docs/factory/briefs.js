@@ -114,7 +114,12 @@
     if (!write(BRIEFS_KEY, briefs)) return;
     activeId = entry.id;
     deletedActive = false;
-    if (!write(DRAFT_KEY, {updatedAt: now, activeId, payload: entry.payload})) return;
+    if (!write(DRAFT_KEY, {updatedAt: now, activeId, deletedActive, payload: entry.payload})) return;
+    // The draft now holds exactly this form. A debounced autosave queued just
+    // before this save (tapping Save blurs a field, which fires change) would
+    // only rewrite the same payload with a new time 300 ms later, so cancel it.
+    // On a failed write above it stays queued as the fallback.
+    clearTimeout(timer);
     demoMode = false;
     status(`“${titleOf(entry.payload)}” is saved in My flyers.`);
     renderList();

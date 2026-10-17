@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import traceback
 import uuid
 
 
@@ -42,7 +43,7 @@ def _check_spanish(chrome, output_dir):
     source = {
         'headline': 'CultureShyft neighborhood night',
         'subheadline': 'Media made to move people.',
-        'body': 'Jordan Lee has 25 tickets at 123 Main Street. Visit https://example.test/path.',
+        'body': 'Jordan Lee has 25 tickets at 123 Main Street, Apt A, Detroit. Visit https://example.test/path.',
         'cta': 'Call today at 248-505-0050',
         'instagramCaption': 'Meet Jordan Lee at 123 Main Street. ¿Ready?',
         'facebookDescription': 'CultureShyft welcomes neighbors on October 24 at 2 PM.',
@@ -50,7 +51,7 @@ def _check_spanish(chrome, output_dir):
     translated = {
         'headline': 'Noche del vecindario de CultureShyft',
         'subheadline': 'Media made to move people.',
-        'body': 'Jordan Lee tiene 25 boletos en 123 Main Street. Visita https://example.test/path.',
+        'body': 'Jordan Lee tiene 25 boletos en 123 Main Street, Apt A, Detroit. Visita https://example.test/path.',
         'cta': 'Llama hoy al 248-505-0050',
         'instagramCaption': 'Conoce a Jordan Lee en 123 Main Street. ¿Listos?',
         'facebookDescription': 'CultureShyft da la bienvenida a los vecinos el October 24 at 2 PM.',
@@ -58,7 +59,7 @@ def _check_spanish(chrome, output_dir):
     unicode_result = {
         **translated,
         'headline': '¿Sueñas con una comunidad CultureShyft más unida?',
-        'body': 'Niñas, niños y familias: reunión en 123 Main Street. Ven con Jordan Lee y 25 vecinos. https://example.test/path.',
+        'body': 'Niñas, niños y familias: reunión en 123 Main Street, Apt A, Detroit. Ven con Jordan Lee y 25 vecinos. https://example.test/path.',
         'cta': '¡Llama al 248-505-0050!',
         'instagramCaption': '¿Mañana? Sí. Cultura, conexión y niñez en 123 Main Street.',
         'facebookDescription': '¡Acompáñanos! CultureShyft reúne a la comunidad el October 24 at 2 PM.',
@@ -161,8 +162,8 @@ def _check_spanish(chrome, output_dir):
             return body['messages'][0]['content'], body['messages'][1]['content']
 
         def validate_request(provider, call, expected_source):
-            assert call['provider'] == provider
-            assert call['method'] == 'POST'
+            assert call['provider'] == provider, f'{provider}: wrong provider endpoint'
+            assert call['method'] == 'POST', f'{provider}: expected a POST request'
             assert call['url'] == PROVIDERS[provider][1], call['url']
             assert FAKE_KEY not in call['url']
             headers, body = call['headers'], call['body']
@@ -178,8 +179,8 @@ def _check_spanish(chrome, output_dir):
                 assert headers['anthropic-version'] == '2023-06-01'
                 assert headers['anthropic-dangerous-direct-browser-access'] == 'true'
             else:
-                assert headers['authorization'] == 'Bearer ' + FAKE_KEY
-                assert body['response_format']['type'] == 'json_object'
+                assert headers['authorization'] == 'Bearer ' + FAKE_KEY, 'OpenAI: incorrect authorization header'
+                assert body['response_format']['type'] == 'json_object', 'OpenAI: missing JSON response format'
             system, user = system_and_user(call)
             voice = page.evaluate('factoryAI.BRAND_VOICE')
             assert voice and voice in system
@@ -256,6 +257,12 @@ def _check_spanish(chrome, output_dir):
             english_draft = page.evaluate('(k) => localStorage.getItem(k)', DRAFT_KEY)
             english_library = json.loads(page.evaluate('(k) => localStorage.getItem(k)', BRIEFS_KEY))
             assert len(english_library) == 1
+            # Tapping Save blurs the focused field, whose change event queues a
+            # debounced autosave. Save must cancel it; otherwise it rewrites the
+            # draft 300 ms later and every "preview left the draft alone" check
+            # below would fail for a reason unrelated to the preview.
+            page.wait_for_timeout(500)
+            assert page.evaluate('(k) => localStorage.getItem(k)', DRAFT_KEY) == english_draft, 'Save to My flyers left a pending autosave that rewrote the draft'
             call_count = len(calls)
             for field in originals:
                 page.locator('#' + field).press('End')
@@ -269,9 +276,10 @@ def _check_spanish(chrome, output_dir):
                 assert len(calls) == call_count + 1, 'Spanish version must use one request'
                 validate_request(provider, calls[-1], source)
                 assert brief() == english_form, 'Translation preview changed the English form'
-                assert page.evaluate('(k) => localStorage.getItem(k)', DRAFT_KEY) == english_draft
+                assert page.evaluate('(k) => localStorage.getItem(k)', DRAFT_KEY) == english_draft, f'{provider}: English autosave changed during preview'
                 expect(page.locator('#ai-spanish-preview')).to_be_visible()
                 expect(page.locator('#ai-spanish-review-note')).to_have_text(REVIEW_NOTE)
+                expect(page.locator('#ai-spanish-review-note')).to_be_visible()
                 for field, value in translated.items():
                     expect(page.locator('#ai-spanish-' + field)).to_have_value(value)
                     expect(page.locator(f'[data-spanish-field="{field}"] .ai-spanish-english')).to_have_text(source[field])
@@ -329,6 +337,48 @@ def _check_spanish(chrome, output_dir):
             wait_done()
             expect(page.locator('[data-spanish-warning="body"]')).to_be_hidden()
             print('PASS AI card D: missing or altered numbers, address and URL are flagged next to the field')
+
+            for changed_body in (
+                translated['body'].replace('Apt A', 'Apt B'),
+                translated['body'].replace('Detroit', 'Chicago'),
+                translated['body'].replace(', Apt A', ''),
+                translated['body'].replace(', Detroit', ''),
+            ):
+                translate({**translated, 'body': changed_body})
+                wait_done()
+                warning = page.locator('[data-spanish-warning="body"]')
+                expect(warning).to_be_visible()
+                expect(warning).to_have_text('An address is missing or changed. Copy the full address exactly from the English text.')
+                assert brief() == english_form, 'Address warning changed the English form'
+            page.locator('#ai-spanish-body').fill(translated['body'])
+            expect(page.locator('[data-spanish-warning="body"]')).to_be_hidden()
+            print('PASS AI card D: address-only unit/locality changes and omissions warn; exact correction clears warning')
+
+            # The shipped verifier, run in Chrome: unit/locality parts on their
+            # own lines are protected, ordinary prose after a comma is not.
+            def address_warnings(english, spanish):
+                return page.evaluate('([e, s]) => factoryAI.verifySpanishPreservation(e, s)', [english, spanish])
+            address_only = 'An address is missing or changed. Copy the full address exactly from the English text.'
+            for english, changed in (
+                ('123 Main Street\nApt A\nDetroit', '123 Main Street\nApt B\nChicago'),
+                ('123 Main Street\nApt A\nDetroit', '123 Main Street\nApt B\nDetroit'),
+                ('123 Main Street\nApt A\nDetroit', '123 Main Street\nApt A\nChicago'),
+                ('123 Main Street\nApt A\nDetroit', '123 Main Street\nDetroit'),
+                ('123 Main Street,\nDetroit, MI', '123 Main Street,\nChicago, MI'),
+                ('123 Main Street, Detroit, then grab food.', '123 Main Street, Chicago, luego vamos a comer.'),
+                ('123 Main Street, Detroit, MI 48226. Bring a friend.', '123 Main Street, Detroit, OH 48226. Trae a alguien.'),
+            ):
+                assert address_warnings(english, english) == [], f'Exact address copy warned: {english!r}'
+                assert address_warnings(english, changed) == [address_only], f'Address change not flagged: {changed!r}'
+            for english, spanish in (
+                ('123 Main Street, bring a friend.', '123 Main Street, trae a un amigo.'),
+                ('Meet at 123 Main Street, then grab food.', 'Nos vemos en 123 Main Street, luego vamos a comer.'),
+                ('123 Main Street, 7 PM', '123 Main Street, 7 p. m.'),
+                ('123 Main Street\nbring a friend', '123 Main Street\ntrae a un amigo'),
+                ('123 Main Street, Detroit, then grab food.', '123 Main Street, Detroit, luego vamos a comer.'),
+            ):
+                assert address_warnings(english, spanish) == [], f'False address warning for prose: {spanish!r}'
+            print('PASS AI card D: line-separated unit/locality changes warn; prose after a comma does not')
 
             # Cancel, provider failure and the real 30-second timeout keep both
             # the English source and the last complete Spanish preview.
@@ -416,13 +466,15 @@ def _check_spanish(chrome, output_dir):
             spanish_card = page.locator('.brief-card', has_text=source['headline'] + ' (Spanish)')
             expect(spanish_card).to_be_visible()
             expect(spanish_card).to_contain_text(REVIEW_NOTE)
+            expect(spanish_card.locator('.translation-review-note')).to_be_visible()
             spanish_card.locator('.brief-open').click()
             for field in FLYER_FIELDS:
                 expect(page.locator('#' + field)).to_have_value(unicode_result[field])
             assert brief()['translation'] == payload['translation']
             expect(page.locator('#ai-instagram-caption')).to_have_value(unicode_result['instagramCaption'])
             expect(page.locator('#ai-facebook-description')).to_have_value(unicode_result['facebookDescription'])
-            expect(page.locator('body')).to_contain_text(REVIEW_NOTE)
+            expect(page.locator('#brief-translation-note')).to_be_visible()
+            expect(page.locator('#brief-translation-note')).to_have_text(REVIEW_NOTE)
             page.wait_for_timeout(400)
             with page.expect_download() as download:
                 page.locator('#export-brief').click()
@@ -441,7 +493,8 @@ def _check_spanish(chrome, output_dir):
             for field in FLYER_FIELDS:
                 expect(page.locator('#' + field)).to_have_value(unicode_result[field])
             assert brief()['translation'] == payload['translation']
-            expect(page.locator('body')).to_contain_text(REVIEW_NOTE)
+            expect(page.locator('#brief-translation-note')).to_be_visible()
+            expect(page.locator('#brief-translation-note')).to_have_text(REVIEW_NOTE)
             assert len(calls) == call_count, 'Reloading a saved Spanish draft made an AI request'
             leak_check(UNKNOWN_KEY)
             print('PASS AI card D: separate draft, review note, exact fixed fields, storage failure, Unicode save/export/reload')
@@ -449,9 +502,12 @@ def _check_spanish(chrome, output_dir):
             page.set_viewport_size({'width': 390, 'height': 844})
             page.locator('#ai-spanish-button').scroll_into_view_if_needed()
             assert page.locator('#ai-spanish-button').bounding_box()['height'] >= 44
-            if page.locator('#ai-spanish-preview').is_visible():
-                assert page.locator('#ai-spanish-preview').evaluate('e => e.scrollWidth <= e.clientWidth + 1')
-                page.locator('#ai-spanish-preview').screenshot(path=str(output_dir / 'ai-spanish-phone.png'))
+            translate(unicode_result)
+            wait_done()
+            expect(page.locator('#ai-spanish-preview')).to_be_visible()
+            expect(page.locator('#ai-spanish-review-note')).to_be_visible()
+            assert page.locator('#ai-spanish-preview').evaluate('e => e.scrollWidth <= e.clientWidth + 1'), 'Phone Spanish preview overflows horizontally'
+            page.locator('#ai-spanish-preview').screenshot(path=str(output_dir / 'ai-spanish-phone.png'))
             print('PASS AI card D: phone preview has no horizontal overflow and tap target is usable')
         finally:
             for route, _provider in held:
@@ -474,5 +530,6 @@ def check_spanish(chrome, output_dir):
     except checks.CheckFailure:
         raise
     except Exception as error:
-        detail = str(error) or 'an acceptance assertion failed'
+        frame = traceback.extract_tb(error.__traceback__)[-1]
+        detail = str(error) or f'{frame.name}, line {frame.lineno}: {frame.line}'
         raise checks.CheckFailure(f'Spanish AI acceptance: {detail}') from error
