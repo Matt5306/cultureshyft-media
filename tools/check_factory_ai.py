@@ -20,6 +20,11 @@ SUGGESTION = dict(zip(FIELDS, ('Meet your neighbors.', 'Make room for connection
                              'Local makers. Good food. Everyone is welcome.', 'Come through.')))
 VERSIONS = [dict(label=label, **{field: f'{label} {value}' for field, value in SUGGESTION.items()})
             for label in ('Bold', 'Warm', 'Short')]
+POST_RESULT = {
+    'instagram_caption': 'Meet your neighbors. Local makers, good food and room for everyone.',
+    'hashtags': ['#CultureShyft', 'Detroit!', '#detroit', 'Community Event', '#Neighbors'],
+    'facebook_description': 'Meet your neighbors at the Community Room. Local makers and good food bring everyone together.',
+}
 KEY_URLS = {
     'gemini': 'https://aistudio.google.com/apikey',
     'openai': 'https://platform.openai.com/api-keys',
@@ -46,6 +51,13 @@ def check_ai(chrome, output_dir):
     profile.mkdir(parents=True)
     calls, console, errors, held = [], [], [], []
     mock = {'provider': 'gemini', 'mode': 'success', 'text': None}
+
+    def resize(page, width, height):
+        # The flyer preview rescales from resize/ResizeObserver callbacks after
+        # the viewport changes, which shifts everything below it. Wait two
+        # frames so layout assertions measure the settled page, not a race.
+        page.set_viewport_size({'width': width, 'height': height})
+        page.evaluate('() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))')
 
     def response(text):
         if mock['provider'] == 'gemini':
@@ -139,6 +151,20 @@ def check_ai(chrome, output_dir):
         def wait_done():
             expect(page.locator('#ai-write-button')).to_have_text('Write it for me', timeout=40000)
 
+        def post(mode='success', text=None):
+            mock.update(mode=mode, text=text)
+            page.locator('#ai-post-button').click()
+
+        def wait_post_done():
+            expect(page.locator('#ai-post-button')).to_have_text('Write the post', timeout=40000)
+
+        def post_values():
+            return {name: page.locator(selector).input_value() for name, selector in {
+                'instagram_caption': '#ai-instagram-caption',
+                'hashtags': '#ai-hashtags',
+                'facebook_description': '#ai-facebook-description',
+            }.items()}
+
         def validate_request(provider, call, is_test=False):
             assert call['method'] == 'POST'
             assert call['url'] == PROVIDERS[provider][2], call['url']
@@ -191,6 +217,43 @@ def check_ai(chrome, output_dir):
                 elif provider != 'claude':
                     assert body['response_format']['type'] == 'json_object'
 
+        def validate_post_request(provider, call):
+            assert call['method'] == 'POST'
+            assert call['url'] == PROVIDERS[provider][2], call['url']
+            assert FAKE_KEY not in call['url']
+            headers, body = call['headers'], call['body']
+            if provider == 'gemini':
+                assert headers['x-goog-api-key'] == FAKE_KEY
+                user_text = body['contents'][0]['parts'][0]['text']
+                system = body['systemInstruction']['parts'][0]['text']
+                schema = body['generationConfig']['responseSchema']
+                assert set(schema['required']) == {'instagram_caption', 'hashtags', 'facebook_description'}
+                assert schema['properties']['hashtags']['maxItems'] == 8
+            elif provider == 'claude':
+                assert headers['x-api-key'] == FAKE_KEY
+                assert headers['anthropic-dangerous-direct-browser-access'] == 'true'
+                user_text = body['messages'][0]['content']
+                system = body['system']
+            else:
+                assert headers['authorization'] == 'Bearer ' + FAKE_KEY
+                user_text = body['messages'][1]['content']
+                system = body['messages'][0]['content']
+                assert body['response_format']['type'] == 'json_object'
+            sent = json.loads(user_text.split('Flyer fields: ', 1)[1])
+            assert set(sent) == {'headline', 'subheadline', 'date', 'place', 'body', 'cta'}
+            assert sent == {field: page.locator('#' + field).input_value()
+                            for field in ('headline', 'subheadline', 'date', 'place', 'body', 'cta')}
+            serialized = json.dumps(body)
+            for private in ('PRIVATE_CONTACT', 'PRIVATE_CLIENT', 'private-reply@example.com',
+                            'private-qr.example', 'data:image/', 'Community event'):
+                assert private not in serialized, f'Private or out-of-scope post field sent: {private}'
+            assert FAKE_KEY not in serialized
+            voice = page.evaluate('factoryAI.BRAND_VOICE')
+            assert voice in system
+            for rule in ('instagram_caption', 'hashtags', 'facebook_description', '2200', '125',
+                         'Return no more than 8 relevant hashtags', '1000', '5000', 'no emoji', 'date, time and address exactly'):
+                assert rule.lower() in system.lower(), f'Missing post rule: {rule}'
+
         try:
             page.goto(checks.FACTORY_PAGE.as_uri()); ready()
             assert not calls, 'AI requested on page load'
@@ -208,6 +271,7 @@ def check_ai(chrome, output_dir):
                          'game-changing', 'revolutionary', 'unleash', 'no emoji in headlines'):
                 assert term in voice, f'Brand voice missing required rule: {term}'
             print('PASS AI card A: exported brand voice matches brand document, exact tagline and avoid-list')
+            expect(page.locator('#ai-post-button')).to_be_disabled()
             page.locator('#ai-write-button').click()
             expect(page.locator('#ai-settings-dialog')).to_be_visible()
             expect(page.locator('#ai-provider')).to_have_value('gemini')
@@ -216,6 +280,16 @@ def check_ai(chrome, output_dir):
             expect(page.locator('#ai-settings-dialog')).not_to_be_visible()
             expect(page.locator('#ai-write-button')).to_be_focused()
             page.locator('#preset').select_option('community-event')
+            expect(page.locator('#ai-post-button')).to_be_enabled()
+            page.locator('#contact').fill('')
+            expect(page.locator('#ai-post-button')).to_be_disabled()
+            page.locator('#contact').fill('PRIVATE_CONTACT')
+            expect(page.locator('#ai-post-button')).to_be_enabled()
+            page.locator('#ai-post-button').click()
+            expect(page.locator('#ai-settings-dialog')).to_be_visible()
+            page.keyboard.press('Escape')
+            expect(page.locator('#ai-post-button')).to_be_focused()
+            print('PASS AI card B: required-field readiness follows preset/programmatic input and unconfigured tap opens helper')
             original = {'headline': 'Original headline', 'subheadline': 'Original subhead',
                         'date': 'October 24 at 2 PM', 'place': 'Community room',
                         'body': 'Original body\nSecond line.', 'cta': 'Original action'}
@@ -278,14 +352,235 @@ def check_ai(chrome, output_dir):
                 expect(page.locator('#ai-undo')).to_be_visible()
                 page.locator('#ai-undo').click()
                 assert values() == before, 'New multi-version reply cleared the exact Undo snapshot'
+                if provider in ('gemini', 'openai', 'claude'):
+                    post_count = len(calls)
+                    post(text='```json\n' + json.dumps(POST_RESULT) + '\n```'); wait_post_done()
+                    assert len(calls) == post_count + 1, 'Post generation must use exactly one request'
+                    validate_post_request(provider, calls[-1])
+                    assert post_values() == {
+                        'instagram_caption': POST_RESULT['instagram_caption'],
+                        'hashtags': '#CultureShyft #Detroit #CommunityEvent #Neighbors',
+                        'facebook_description': POST_RESULT['facebook_description'],
+                    }
+                    assert values() == before, 'Post generation changed the flyer brief'
+                    expect(page.locator('#ai-post-results')).to_be_visible()
+                    # Reject empty and partially empty replies atomically, even
+                    # after Mark has edited all three boxes. Exercise each adapter.
+                    page.locator('#ai-instagram-caption').fill('My edited caption')
+                    page.locator('#ai-hashtags').fill('#MyEditedTag')
+                    page.locator('#ai-facebook-description').fill('My edited description')
+                    edited_post = post_values()
+                    for caption, description in (('', ''), (' \t\n', ' \n\t'),
+                                                  ('', 'Usable description'), ('Usable caption', ''),
+                                                  (' \t', 'Usable description'), ('Usable caption', '\n ')):
+                        count_before = len(calls)
+                        post(text=json.dumps({'instagram_caption': caption, 'hashtags': [],
+                                              'facebook_description': description}))
+                        wait_post_done()
+                        expect(page.locator('#ai-post-status')).to_contain_text('empty caption or description')
+                        expect(page.locator('#ai-post-status')).to_contain_text('earlier post is unchanged')
+                        expect(page.locator('#ai-post-results')).to_be_visible()
+                        assert post_values() == edited_post
+                        assert len(calls) == count_before + 1
+                        assert values() == before
+                    post(text=json.dumps(dict(POST_RESULT, hashtags=[]))); wait_post_done()
+                    expect(page.locator('#ai-post-status')).to_contain_text('Your post is ready')
+                    expect(page.locator('#ai-hashtags')).to_have_value('')
                 leak_check()
                 print(f'PASS AI card A {provider}: key guidance, one request, 3 labelled choices, per-version/field apply and Undo')
+                if provider in ('gemini', 'openai', 'claude'):
+                    print(f'PASS AI card B {provider}: native shape, schema, privacy, blank/partial reply rejection, edited-copy preservation and recovery')
+
+            # Card C: use the real fixed-viewport measurement, then exercise
+            # the same one-tap fit request through each native provider shape.
+            resize(page, 1024, 1366)
+            page.evaluate('() => document.fonts.ready')
+            card_c_layout = page.locator('#layout').input_value()
+            def settle_fit():
+                page.evaluate('() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))')
+            calls_before_overflow = len(calls)
+            page.locator('#layout').select_option('event')
+            page.locator('#headline').fill(('A welcoming community celebration with music, food, neighbors and practical support ' * 3)[:140])
+            page.locator('#date').fill('Saturday, October 24, 2026 at 2 PM — doors open at 1:30 PM — bring your whole family')
+            page.locator('#body').fill(('Bring your family to see Pastor Jay for music, food and $20 family passes on October 24, 2026. ' * 6)[:450])
+            settle_fit()
+            page.wait_for_function("() => window.factoryGetOverflowingFields().includes('body')")
+            expect(page.locator('#ai-fit-button')).to_be_visible()
+            assert not page.locator('#ai-fit-notice-body').is_hidden()
+            fit_before = {field: page.locator('#' + field).input_value()
+                          for field in ('headline', 'subheadline', 'date', 'place', 'body', 'cta')}
+            fit_fields = page.evaluate('factoryGetOverflowingFields()')
+            assert {'body', 'date'} <= set(fit_fields) <= {'headline', 'subheadline', 'date', 'place', 'body', 'cta'}
+            assert len(calls) == calls_before_overflow, 'Overflow detection made a request before the tap'
+            assert page.evaluate("""() => {
+              const first = window.factoryGetOverflowingFields(); first.length = 0;
+              return window.factoryGetOverflowingFields().includes('body');
+            }"""), 'Returned overflowing-field list must not mutate the measurement result'
+            for field in fit_before:
+                page.locator('#' + field).fill('Short.')
+            settle_fit()
+            page.wait_for_function("() => !window.factoryGetOverflowingFields().length")
+            expect(page.locator('#ai-fit-button')).to_be_hidden()
+            for field, value in fit_before.items():
+                page.locator('#' + field).fill(value)
+            settle_fit()
+            page.wait_for_function("() => ['body', 'date'].every(f => window.factoryGetOverflowingFields().includes(f))")
+            expect(page.locator('#ai-fit-button')).to_be_visible()
+            fit_fields = page.evaluate('factoryGetOverflowingFields()')
+            for provider in ('gemini', 'openai', 'claude'):
+                choose(provider); save_settings()
+                count = len(calls)
+                shorter = {field: (fit_before[field][:max(1, min(20, len(fit_before[field])))] or 'Short') for field in fit_fields}
+                if provider == 'gemini':
+                    shorter['date'] = 'October 24, 2026 at 2 PM; doors 1:30 PM'
+                    shorter['body'] = 'See Pastor Jay October 24, 2026. Family passes: $20.'
+                else:
+                    shorter['date'] = 'October 25, 2026 at 2 PM'
+                mock.update(mode='success', text='```json\n' + json.dumps(shorter) + '\n```')
+                page.locator('#ai-fit-button').click()
+                expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+                assert len(calls) == count + 1
+                call = calls[-1]; headers, body = call['headers'], call['body']
+                assert call['url'] == PROVIDERS[provider][2]
+                user_text = (body['contents'][0]['parts'][0]['text'] if provider == 'gemini'
+                             else body['messages'][0 if provider == 'claude' else 1]['content'])
+                sent = json.loads(user_text.split('Requested fields: ', 1)[1])
+                assert set(sent) == set(fit_fields)
+                assert all(sent[field]['text'] == fit_before[field] and sent[field]['character_budget'] > 0
+                           for field in fit_fields)
+                serialized = json.dumps(body)
+                for private in ('PRIVATE_CONTACT', 'PRIVATE_CLIENT', 'private-reply@example.com', 'private-qr.example', 'data:image/'):
+                    assert private not in serialized, 'Fit request sent private data'
+                if provider == 'gemini':
+                    assert set(body['generationConfig']['responseSchema']['properties']) == set(fit_fields)
+                    assert set(body['generationConfig']['responseSchema']['required']) == set(fit_fields)
+                elif provider == 'claude':
+                    assert headers['x-api-key'] == FAKE_KEY
+                    assert headers['anthropic-dangerous-direct-browser-access'] == 'true'
+                else:
+                    assert headers['authorization'] == 'Bearer ' + FAKE_KEY
+                assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+                expect(page.locator('#ai-fit-suggestions')).to_be_visible()
+                date_row = page.locator('[data-ai-fit-field="date"]')
+                expect(date_row.locator('.ai-current')).to_have_text(fit_before['date'])
+                expect(date_row.locator('.ai-suggested')).to_have_text(shorter['date'])
+                expect(date_row.locator('.ai-fit-counts')).to_contain_text(str(len(fit_before['date'])))
+                if provider == 'gemini':
+                    expect(page.locator('[data-ai-fit-field="body"] .ai-suggested')).to_contain_text('Pastor Jay')
+                    expect(page.locator('[data-ai-fit-field="body"] .ai-suggested')).to_contain_text('$20')
+                    # Same numbers (repeats dropped): no numbers warning.
+                    expect(page.locator('[data-ai-fit-warning="date"]')).to_have_count(0)
+                    expect(page.locator('[data-ai-fit-warning="body"]')).to_have_count(0)
+                else:
+                    # A changed date is shown with a plain numbers warning, never applied.
+                    expect(page.locator('[data-ai-fit-warning="date"]')).to_have_text(re.compile('Numbers changed'))
+                first_field = next(field for field in fit_fields if field != 'date')
+                page.locator(f'[data-ai-fit-use="{first_field}"]').click()
+                expect(page.locator('#ai-undo')).to_be_visible()
+                after_first = {field: page.locator('#' + field).input_value() for field in fit_before}
+                page.locator('[data-ai-fit-use="date"]').click()
+                page.locator('#ai-undo').click()
+                assert {field: page.locator('#' + field).input_value() for field in fit_before} == after_first
+                page.locator('[data-ai-fit-use="date"]').click()
+                expect(page.locator('#date')).to_have_value(shorter['date'])
+                page.locator('#ai-undo').click()
+                assert {field: page.locator('#' + field).input_value() for field in fit_before} == after_first
+                for field, value in fit_before.items(): page.locator('#' + field).fill(value)
+                page.wait_for_function("() => ['body', 'date'].every(f => window.factoryGetOverflowingFields().includes(f))")
+            # A later reply is review-only: it never clears the Undo from the
+            # last accepted shorter value.
+            mock.update(mode='success', text=json.dumps({field: fit_before[field][:20] or 'Short' for field in fit_fields}))
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            page.locator(f'[data-ai-fit-use="{next(field for field in fit_fields if field != "date")}"]').click()
+            expect(page.locator('#ai-undo')).to_be_visible()
+            settle_fit()
+            next_fields = page.evaluate('factoryGetOverflowingFields()')
+            mock.update(mode='success', text=json.dumps({field: page.locator('#' + field).input_value()[:20] or 'Short' for field in next_fields}))
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            expect(page.locator('#ai-undo')).to_be_visible()
+            page.locator('#ai-undo').click()
+            assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+            # Manual edits after a preview are never overwritten by Use this.
+            mock.update(mode='success', text=json.dumps({field: fit_before[field][:20] or 'Short' for field in fit_fields}))
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            stale_field = next(field for field in fit_fields if field != 'date')
+            page.locator('#' + stale_field).fill('Manual change that must remain.')
+            page.locator(f'[data-ai-fit-use="{stale_field}"]').click()
+            expect(page.locator('#ai-fit-status')).to_contain_text('changed after this suggestion')
+            expect(page.locator('#' + stale_field)).to_have_value('Manual change that must remain.')
+            for field, value in fit_before.items(): page.locator('#' + field).fill(value)
+            page.wait_for_function("() => ['body', 'date'].every(f => window.factoryGetOverflowingFields().includes(f))")
+            # A malformed result or a cancelled fit request leaves both the
+            # prior preview and the flyer form unchanged.
+            prior_preview = page.locator('#ai-fit-suggestion-fields').inner_text()
+            mock.update(mode='success', text='not JSON')
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            expect(page.locator('#ai-fit-status')).to_contain_text('JSON')
+            assert page.locator('#ai-fit-suggestion-fields').inner_text() == prior_preview
+            assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+            # Empty or whitespace-only shorter values are rejected as a whole
+            # reply: no field can be blanked, and the earlier preview stays.
+            for empty_value in ('', ' ' + chr(9) + chr(10)):
+                reply = {field: 'Short ' + field for field in fit_fields}
+                reply['date'] = empty_value
+                mock.update(mode='success', text=json.dumps(reply))
+                page.locator('#ai-fit-button').click()
+                expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+                expect(page.locator('#ai-fit-status')).to_contain_text('empty shorter version')
+                assert page.locator('#ai-fit-suggestion-fields').inner_text() == prior_preview, 'Empty fit reply replaced the earlier preview'
+                assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before, 'Empty fit reply changed the form'
+            mock.update(mode='hold', text=None)
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Working...')
+            page.locator('#ai-fit-cancel-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            expect(page.locator('#ai-fit-status')).to_contain_text('Cancelled')
+            assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+            # Use this (all) writes every shown field with its own distinct
+            # replacement, re-measures, and one Undo restores the exact values.
+            distinct = {field: f'Fit {field} {index}' for index, field in enumerate(fit_fields)}
+            mock.update(mode='success', text=json.dumps(distinct))
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            expect(page.locator('#ai-fit-apply-all')).to_have_attribute('aria-label', 'Use all shorter fields')
+            page.locator('#ai-fit-apply-all').click()
+            applied = {field: page.locator('#' + field).input_value() for field in fit_before}
+            assert applied == {**fit_before, **distinct}, f'Use all skipped or altered a field: {applied}'
+            expect(page.locator('#ai-fit-status')).to_contain_text('It fits this layout')
+            page.locator('#ai-undo').click()
+            assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+            # Applying every shown field can still leave an overfull layout; it
+            # must say so plainly and retain one exact Undo snapshot.
+            unchanged = {field: fit_before[field] for field in fit_fields}
+            mock.update(mode='success', text=json.dumps(unchanged))
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            page.locator('#ai-fit-apply-all').click()
+            expect(page.locator('#ai-fit-status')).to_contain_text('Some text still does not fit')
+            page.locator('#ai-undo').click()
+            assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+            # Restore the shared brief so later checks compare against the
+            # same exact 'before' values they captured (test isolation).
+            page.locator('#layout').select_option(card_c_layout)
+            for field in fit_before:
+                page.locator('#' + field).fill(before[field])
+            settle_fit()
+            assert values() == before, 'Card C did not restore the shared brief'
+            print('PASS AI card C: real overflow trigger, tap-only field-minimal requests, all native adapters, preview/apply-all/Undo, empty-reply rejection, numbers warning and changed-date review')
 
             for width, height in ((1440, 1200), (390, 844)):
-                page.set_viewport_size({'width': width, 'height': height})
-                boxes = [card.bounding_box() for card in page.locator('[data-ai-version]').all()]
+                resize(page, width, height)
+                # Measure all cards in one layout snapshot so a late reflow
+                # cannot land between them.
+                boxes = page.locator('[data-ai-version]').evaluate_all(
+                    'cards => cards.map(c => { const r = c.getBoundingClientRect(); return {x: r.x, y: r.y}; })')
+                assert len(boxes) == 3, f'Expected 3 version cards, got {len(boxes)}'
                 if width == 1440:
-                    assert max(b['y'] for b in boxes) - min(b['y'] for b in boxes) < 2, 'Versions not side by side'
+                    assert max(b['y'] for b in boxes) - min(b['y'] for b in boxes) < 2, f'Versions not side by side: {boxes}'
                     assert boxes[0]['x'] < boxes[1]['x'] < boxes[2]['x']
                 else:
                     assert boxes[0]['y'] < boxes[1]['y'] < boxes[2]['y'], 'Versions not stacked on phone'
@@ -295,6 +590,156 @@ def check_ai(chrome, output_dir):
                 page.locator('#ai-suggestions').screenshot(path=str(output_dir / f'ai-versions-{width}.png'))
             page.set_viewport_size({'width': 1024, 'height': 1366})
             print('PASS AI card A: side-by-side desktop and stacked phone choices, no overflow, touch targets')
+
+            # Post parser limits and hashtag cleanup are enforced after parsing,
+            # including a sentence mark exactly one character beyond each cap.
+            choose('gemini'); save_settings()
+            limits = page.evaluate('factoryAI.POST_LIMITS')
+            assert limits == {'instagramCaption': 2200, 'instagramHook': 125, 'hashtags': 8,
+                              'facebookAim': 1000, 'facebookDescription': 5000}
+            assert page.locator('#ai-instagram-caption').get_attribute('maxlength') == str(limits['instagramCaption'])
+            assert page.locator('#ai-facebook-description').get_attribute('maxlength') == str(limits['facebookDescription'])
+            capped = {
+                'instagram_caption': 'A' * limits['instagramCaption'] + '. trailing words',
+                'hashtags': [' Culture Shyft ', '#Detroit!', '#detroit', 'one', 'two', 'three',
+                             'four', 'five', 'six', 'seven', 'eight', 'nine'],
+                'facebook_description': 'B' * limits['facebookDescription'] + '. trailing words',
+            }
+            post(text='Provider preface\n```json\n' + json.dumps(capped) + '\n```\nend'); wait_post_done()
+            capped_values = post_values()
+            assert len(capped_values['instagram_caption']) == limits['instagramCaption']
+            assert len(capped_values['facebook_description']) == limits['facebookDescription']
+            tags = capped_values['hashtags'].split()
+            assert tags == ['#CultureShyft', '#Detroit', '#one', '#two', '#three', '#four', '#five', '#six']
+            assert all(re.fullmatch(r'#[A-Za-z0-9]+', tag) for tag in tags)
+            expect(page.locator('#ai-instagram-count')).to_have_text('2,200 / 2,200 characters')
+            expect(page.locator('#ai-facebook-count')).to_have_text('5,000 / 5,000 characters · Aim for 1,000 or fewer')
+            expect(page.locator('#ai-instagram-hook')).to_have_text('Hook preview (first 125 characters): ' + 'A' * 125)
+            expect(page.locator('#ai-hashtags-count')).to_contain_text('8 / 8 hashtags')
+            bounded = page.evaluate('''limits => factoryAI.parsePost(JSON.stringify({
+              instagram_caption: 'word '.repeat(420) + 'Stop. ' + 'tail '.repeat(100),
+              hashtags: [], facebook_description: 'word '.repeat(1100)
+            }))''', limits)
+            assert bounded['instagramCaption'].endswith('Stop.')
+            assert len(bounded['instagramCaption']) <= limits['instagramCaption']
+            assert bounded['facebookDescription'].endswith('word')
+            assert len(bounded['facebookDescription']) <= limits['facebookDescription']
+            exact_word = 'a' * (limits['instagramCaption'] - 5) + ' word'
+            exact_post = page.evaluate('''text => factoryAI.parsePost(JSON.stringify({
+              instagram_caption: text + ' more', hashtags: [], facebook_description: 'Valid description'
+            }))''', exact_word)
+            assert exact_post['instagramCaption'] == exact_word, 'Dropped a complete word exactly at the cap'
+            print('PASS AI card B: fenced parser, sentence/word boundaries, hard caps including off-by-one, 8 cleaned de-duplicated hashtags')
+
+            # The boxes are editable for this page, counts stay live, and both
+            # clipboard paths copy only normalized plain text.
+            page.locator('#ai-instagram-caption').fill('Five')
+            expect(page.locator('#ai-instagram-count')).to_have_text('4 / 2,200 characters')
+            expect(page.locator('#ai-instagram-hook')).to_have_text('Hook preview (first 125 characters): Five')
+            page.evaluate('''() => Object.defineProperty(navigator, 'clipboard', {configurable: true,
+              value: {writeText: async text => { window.__copiedText = text; }}})''')
+            page.locator('[data-ai-copy="ai-instagram-caption"]').click()
+            expect(page.locator('#ai-instagram-copy-status')).to_have_text('Copied')
+            assert page.evaluate('window.__copiedText') == 'Five'
+            page.locator('#ai-hashtags').fill('Culture-Shyft #Detroit #detroit #One #Two #Three #Four #Five #Six #Seven #Eight #Nine')
+            page.locator('[data-ai-copy="ai-hashtags"]').click()
+            expect(page.locator('#ai-hashtags-copy-status')).to_have_text('Copied')
+            copied_tags = page.evaluate('window.__copiedText')
+            assert copied_tags == '#CultureShyft #Detroit #One #Two #Three #Four #Five #Six'
+            expect(page.locator('#ai-hashtags-count')).to_contain_text('8 / 8 hashtags')
+            page.locator('#ai-facebook-description').fill('Fallback copy')
+            page.evaluate('''() => {
+              navigator.clipboard.writeText = async () => { throw new Error('blocked'); };
+              document.execCommand = command => {
+                const field = document.activeElement;
+                window.__fallbackText = command === 'copy' ? field.value.slice(field.selectionStart, field.selectionEnd) : '';
+                return command === 'copy';
+              };
+            }''')
+            page.locator('[data-ai-copy="ai-facebook-description"]').click()
+            expect(page.locator('#ai-facebook-copy-status')).to_have_text('Copied')
+            assert page.evaluate('window.__fallbackText') == 'Fallback copy'
+            for failure in ('false', 'throw'):
+                page.evaluate('''failure => {
+                  document.execCommand = () => {
+                    if (failure === 'throw') throw new Error('Copy blocked');
+                    return false;
+                  };
+                }''', failure)
+                page.locator('[data-ai-copy="ai-facebook-description"]').click()
+                expect(page.locator('#ai-facebook-copy-status')).to_have_text('Text selected. Use Copy in your browser.')
+                expect(page.locator('#ai-facebook-description')).to_be_focused()
+                assert page.locator('#ai-facebook-description').evaluate('e => e.value.slice(e.selectionStart, e.selectionEnd)') == 'Fallback copy'
+            print('PASS AI card B: live counts/hook, clipboard success and blocked fallback recovery with selected text')
+
+            # Hostile output remains text. Failed regeneration, provider errors,
+            # cancellation and the real 30-second timeout preserve prior results.
+            markup = '<script>window.__postHostile=1</script><img src=x onerror="window.__postHostile=1">'
+            script_count = page.locator('script').count()
+            echoed = {'instagram_caption': 'Echo ' + FAKE_KEY + ' ' + UNKNOWN_KEYS[0],
+                      'hashtags': [FAKE_KEY, '#Prefix' + UNKNOWN_KEYS[0], '#Safe'],
+                      'facebook_description': 'Echo ' + FAKE_KEY + ' ' + UNKNOWN_KEYS[0]}
+            post(text=json.dumps(echoed)); wait_post_done()
+            expect(page.locator('#ai-instagram-caption')).to_have_value('Echo [key removed] [key removed]')
+            expect(page.locator('#ai-hashtags')).to_have_value('#Safe')
+            expect(page.locator('#ai-facebook-description')).to_have_value('Echo [key removed] [key removed]')
+            assert FAKE_KEY not in page.content() and UNKNOWN_KEYS[0] not in page.content()
+            assert FAKE_KEY not in json.dumps(post_values()) and UNKNOWN_KEYS[0] not in json.dumps(post_values())
+            safe_post = {'instagram_caption': markup, 'hashtags': ['#Safe'], 'facebook_description': 'SESSION_ONLY_MARKER'}
+            post(text=json.dumps(safe_post)); wait_post_done()
+            expect(page.locator('#ai-instagram-caption')).to_have_value(markup)
+            assert page.locator('script').count() == script_count
+            assert page.locator('img[src="x"], [onerror]').count() == 0
+            assert page.evaluate('window.__postHostile === undefined')
+            preserved = post_values()
+            for mode, text_value, pattern in (('success', 'not JSON', r'JSON'), (429, None, r'wait|quota')):
+                post(mode, text_value); wait_post_done()
+                expect(page.locator('#ai-post-status')).to_contain_text(re.compile(pattern, re.I))
+                assert post_values() == preserved
+            post('hold')
+            expect(page.locator('#ai-post-button')).to_have_text('Working...')
+            page.locator('#ai-post-cancel-button').click(); wait_post_done()
+            expect(page.locator('#ai-post-status')).to_contain_text(re.compile('cancel', re.I))
+            assert post_values() == preserved
+            post('hold'); wait_post_done()
+            expect(page.locator('#ai-post-status')).to_contain_text(re.compile('30 seconds|timed out', re.I))
+            assert post_values() == preserved
+            print('PASS AI card B: key-echo redaction, hostile text safety and old-result preservation across malformed/error/cancel/real timeout')
+
+            # Post copy never enters brief collection, autosave, saved flyers or
+            # export, and a second page in the same browser starts with no post.
+            assert 'SESSION_ONLY_MARKER' not in json.dumps(values())
+            page.locator('#save-brief').click()
+            saved_headline = page.locator('#headline').input_value()
+            page.locator('#headline').fill('Autosave isolation check')
+            page.wait_for_function('''() => JSON.parse(localStorage.getItem('cultureshyft.factory.draft.v1'))
+              .payload.values.headline === 'Autosave isolation check' ''')
+            assert page.evaluate('''() => JSON.parse(localStorage.getItem('cultureshyft.factory.briefs.v1'))
+              .some(entry => entry.payload.values.headline === 'Autosave isolation check')''')
+            non_ai_storage = page.evaluate('''() => Object.fromEntries(Object.keys(localStorage)
+              .filter(k => k !== 'cultureshyft.factory.ai.v1').map(k => [k, localStorage.getItem(k)]))''')
+            assert 'SESSION_ONLY_MARKER' not in json.dumps(non_ai_storage)
+            with page.expect_download() as post_export:
+                page.locator('#export-brief').click()
+            post_export_path = output_dir / 'post-isolation-brief.json'
+            post_export.value.save_as(str(post_export_path))
+            assert 'SESSION_ONLY_MARKER' not in post_export_path.read_text(encoding='utf-8')
+            page.locator('#headline').fill(saved_headline)
+            fresh = context.new_page()
+            fresh.goto(checks.FACTORY_PAGE.as_uri())
+            fresh.evaluate('() => window.factoryReady')
+            expect(fresh.locator('#ai-post-results')).to_be_hidden()
+            for selector in ('#ai-instagram-caption', '#ai-hashtags', '#ai-facebook-description'):
+                expect(fresh.locator(selector)).to_have_value('')
+            fresh.close()
+            for width, height in ((1440, 1200), (1024, 1366), (390, 844)):
+                resize(page, width, height)
+                assert page.locator('.ai-post').evaluate('e => e.scrollWidth <= e.clientWidth + 1')
+                for button in page.locator('.ai-post button').all():
+                    if button.is_visible(): assert button.bounding_box()['height'] >= 44
+                page.locator('.ai-post').screenshot(path=str(output_dir / f'ai-post-{width}.png'))
+            page.set_viewport_size({'width': 1024, 'height': 1366})
+            print('PASS AI card B: session-only persistence/export isolation, reload reset, desktop/phone layout evidence')
 
             # Partial, sparse, fenced and prose-wrapped replies preserve usable
             # choices. Bad labels and key echoes must never become executable DOM.
@@ -510,7 +955,7 @@ def check_ai(chrome, output_dir):
             # Dialog keyboard containment and touch layout at iPad and narrow phone widths.
             open_settings()
             for width, height in ((1024, 1366), (390, 844)):
-                page.set_viewport_size({'width': width, 'height': height})
+                resize(page, width, height)
                 for selector in ('#ai-provider', '#ai-api-key', '#ai-show-key', '#ai-test-connection', '#ai-save-settings'):
                     box = page.locator(selector).bounding_box()
                     assert box and box['height'] >= 44 and box['width'] >= 44, selector

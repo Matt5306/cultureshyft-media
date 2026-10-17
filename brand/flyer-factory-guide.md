@@ -36,7 +36,7 @@ Choose **Save to My flyers** to keep the job on this device. A received link or 
 
 ## Connect your AI
 
-**AI helper → Gemini → paste key → Test connection → Save → Write it for me → review → Use this**
+**AI helper → Gemini → paste key → Test connection → Save → Write it for me → review → Use this → Write the post → Copy**
 
 AI is optional and only available in the factory. Customers see no AI controls on the order page. Start with Gemini on the iPad:
 
@@ -49,6 +49,19 @@ AI is optional and only available in the factory. Customers see no AI controls o
 7. Choose an occasion and fill in the details you know. Tap **Write it for me** near Headline.
 8. The page moves to a review panel with **Bold**, **Warm**, and **Short** versions from one request. They sit side by side on wide screens and stack on narrow screens. Compare **Your text** and **Suggested**, checking facts, tone and spelling. Tap **Use this** at the top of your chosen version to apply its headline, subheadline, body and call to action. Tap **Use this** under one field to apply only that field. Nothing changes before that tap.
 9. Tap **Undo** to restore the exact values from immediately before your last acceptance. It is one level, not a history. A new AI reply keeps Undo available; your own edits clear it so Undo cannot overwrite your manual work.
+
+When the flyer has both its required headline and contact line, **Write the post** becomes available under the social-image downloads. One tap sends the headline, subheadline, date, place, body and call to action to the provider and returns an Instagram caption, up to 8 cleaned hashtags and a Facebook event description. The contact line only unlocks the button; it is never sent. Check that dates, times and addresses match the flyer exactly. Each result box shows its live character count and can be edited for this open page. Tap the **Copy** button under a box to copy only that box; **Copied** confirms success. If browser copying is blocked, the text stays selected so you can use the device’s Copy command. These post results are temporary: they are not added to saved flyers, autosave or exported brief JSON.
+
+The hook preview shows the first 125 characters of your Instagram caption as you edit. Put the main reason to read there. For Facebook, aim for 1,000 characters or fewer; the hard limit is 5,000. Hashtags containing an API key are dropped.
+
+When a field is too long for the chosen layout, a small message appears beneath it and **Make it fit** appears below Layout. This happens when the preview cuts off text or has to reduce its type size by at least a quarter. Checking the fit happens on your device and sends nothing to AI.
+
+1. Tap **Make it fit** to ask your connected AI for shorter wording. Only the overflowing fields, layout name and suggested character budgets are sent. AI is told to preserve meaning and keep names, dates, times, addresses and prices unchanged.
+2. Compare **Your text** and **Shorter** side by side, including their character counts. Check every fact yourself: the AI can change a date or lose meaning even when told not to. If a number in the shorter version differs from yours, the panel says **Numbers changed** under that field. Nothing in your flyer changes when the reply arrives, and a reply with an empty shorter version is rejected without replacing anything.
+3. Tap **Use this** below one field to replace only that field, or **Use this** at the top to accept all the shown fields. The factory checks the fit again and tells you if text is still too long. You can edit it manually or tap **Make it fit** again.
+4. Tap the shared **Undo** button above the review panels to restore the exact values from before the last acceptance. Asking for another reply does not remove Undo. Your own edits clear it.
+
+While a writing request is running, tap its **Cancel** button to stop waiting. A failed, cancelled or timed-out request leaves your flyer and previous suggestions intact. A post reply with an empty caption or description is rejected without replacing any box. Requests time out after 30 seconds; there is no automatic retry. Shortening previews stay only in the open page until you use them; a reload clears unaccepted suggestions.
 
 Every writing request includes the shared CultureShyft voice rules and the exact tagline, “Media made to move people.” AI can still make mistakes; check the result. If a reply has only 1 or 2 usable versions, the panel tells you and shows those choices. You can use one or tap **Write it for me** again. Failed or cancelled requests preserve your flyer and earlier choices; there is no automatic retry. Unaccepted versions stay only in this open page and disappear on reload.
 
@@ -66,13 +79,27 @@ A free Gemini key does not mean unlimited requests. Limits are per project and v
 
 Model names are editable because availability can change. For local AI, in LM Studio **turn on Enable CORS in the Developer tab and Start server**. For Ollama, set `OLLAMA_ORIGINS=https://cultureshyftmedia.com` then restart Ollama. Safari on iPad usually cannot reach a local `http://` server from an https page, so use Gemini on the iPad. `localhost` means the device running the browser, not another computer.
 
-Only tapping **Test connection** or **Write it for me** sends an AI request. Writing sends the selected occasion and headline, subheadline, date, place, body and call to action. It does not send the contact field, customer name/email, QR URL or photo. Anything private typed into an allowed text field would still be sent. Suggestions stay on this page until accepted; accepted copy uses the normal brief save/export flow.
+Only tapping **Test connection**, **Write it for me**, **Write the post**, **Make it fit** or **Spanish version** sends an AI request. **Write it for me** sends the selected occasion and headline, subheadline, date, place, body and call to action. **Write the post** sends those same flyer fields except the occasion. **Make it fit** sends only overflowing fields from that list, with the layout and character budgets. None of these writing actions sends the contact field, customer name/email, QR URL or photo. Anything private typed into an allowed text field would still be sent. Suggestions stay on this page until accepted; accepted flyer copy uses the normal brief save/export flow. Post copy stays only on the open page unless included in a separately saved Spanish draft, as explained below.
 
 Your key stays in this browser and is only sent to the company you chose. Settings use one localStorage entry, `cultureshyft.factory.ai.v1`, shaped as `{provider, model, baseUrl, keys:{provider:key}}`. Keys are separate from briefs, exports and draft autosave. This is browser storage, not an encrypted password vault; use a trusted device/browser. If storage is blocked or full, the helper warns once and keeps settings in memory for this open session. Re-enter them after closing the page.
 
 To remove a saved key, open **AI helper**, choose its provider, tap **Forget my key**, and confirm. Repeat for other saved providers. This leaves your flyers intact. If storage cannot update, the helper tries removing its one AI settings entry and explains when other saved AI settings were also removed; current session settings remain available. If removal is blocked too, follow the warning and revoke the key with the provider. Revoke a compromised key at the provider as well. Clearing this site’s data removes AI settings along with other saved factory data, so export your work first.
 
 If a request fails, the helper explains the next step and preserves the form. For a rejected key, create a new one and test it. For a quota limit, wait a minute or try another model. For an unavailable model, enter one your account can use. Check your connection for offline errors. **Cancel** stops waiting; requests time out after 30 seconds and never retry automatically. A provider may already have processed a cancelled request. You can keep writing manually at any time.
+
+## Make a Spanish draft
+
+**Spanish version → compare English | Spanish → Save as Spanish draft → My flyers**
+
+1. Tap **Spanish version** near **Write it for me**. If AI is not connected, the AI helper opens; connect and save your settings, then tap **Spanish version** again. Only this tap sends the headline, subheadline, body and call to action, plus any Instagram caption and Facebook description currently shown. The date, place and contact fields, customer details, QR link and photo are not sent. Details already written inside the translated text are sent, so check for private information first.
+2. Compare **English | Spanish** in the preview. The brand name stays CultureShyft and the tagline stays “Media made to move people.” Dates, place and contact are copied exactly into the new draft. Check proper names and every other fact yourself. Warnings beside a Spanish field flag changed or missing numbers, recognized street addresses, URLs and emails; these checks cannot recognize every kind of address or mistake.
+3. Edit Spanish text directly in the preview if needed. **Too long — shorten** means the reply exceeds that field’s limit. The full reply stays visible, and saving waits until you shorten it; no sentence is silently cut. Fact warnings remain visible for review but do not prevent saving a draft.
+4. Tap **Save as Spanish draft**. Wait for **Spanish draft saved in My flyers**. A separate entry named with the English headline followed by **(Spanish)** appears. Your English form, saved entry and autosave stay unchanged. The Spanish entry also keeps the translated caption and description when present. The save button disables after success to prevent accidental duplicate saves; editing the preview enables another save.
+5. Tap **My flyers**, then **Open** on the Spanish entry to work on it. The review note stays visible on its saved card and above the open flyer. Its saved social text appears in the post boxes. Tap **Export brief** for a JSON backup, including the Spanish text, accents and review note; **Import brief** restores it. As with English post copy, later edits made only in the post boxes are temporary.
+
+**Review before printing. Have someone who speaks Spanish check this translation.** This note always appears on the translation preview and saved Spanish entry. Saving does not print or export a PDF automatically.
+
+Tap the Spanish request’s **Cancel** to stop waiting. Requests time out after 30 seconds without retrying. A failed request keeps the English flyer and any earlier preview. If storage is blocked, full or damaged, a **Spanish draft could not be saved** message appears beside the save button; the preview stays available. Copy its Spanish text before closing, allow storage or free space, then tap **Save as Spanish draft** again. Do not clear saved work to resolve a storage warning without exporting it first. To remove an unwanted Spanish draft, use its existing **Delete** confirmation in My flyers after exporting anything you need; the English entry remains separate.
 
 ## 3. Invoice and get paid
 

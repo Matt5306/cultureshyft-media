@@ -57,20 +57,30 @@
           <option value="event">Event — date &amp; details</option>
           <option value="announcement">Announcement — just the message</option>
         </select>
+        <div class="ai-fit-actions"><button type="button" class="quiet-button" id="ai-fit-button" hidden>Make it fit</button><button type="button" class="quiet-button" id="ai-fit-cancel-button" hidden>Cancel</button></div>
+        <p class="field-help ai-write-status" id="ai-fit-status" role="status" aria-live="polite"></p>
         <div class="ai-write-row"><label for="headline">Headline <span>required</span></label><button type="button" class="quiet-button" id="ai-write-button">Write it for me</button><button type="button" class="quiet-button" id="ai-cancel-button" hidden>Cancel</button></div>
         <p class="field-help ai-write-status" id="ai-write-status" role="status" aria-live="polite"></p>
-        <input id="headline" name="headline" maxlength="140" required placeholder="What's happening?">
+        <div class="ai-spanish-actions"><button type="button" class="quiet-button" id="ai-spanish-button">Spanish version</button><button type="button" class="quiet-button" id="ai-spanish-cancel-button" hidden>Cancel</button></div>
+        <p class="field-help ai-write-status" id="ai-spanish-status" role="status" aria-live="polite"></p>
+        <input id="headline" name="headline" maxlength="140" required placeholder="What's happening?" aria-describedby="ai-fit-notice-headline">
+        <p class="field-help ai-fit-notice" id="ai-fit-notice-headline" hidden>Your headline is too long for this layout.</p>
         <label for="subheadline">Subheadline</label>
-        <input id="subheadline" name="subheadline" maxlength="180" placeholder="One sentence that makes it matter">
+        <input id="subheadline" name="subheadline" maxlength="180" placeholder="One sentence that makes it matter" aria-describedby="ai-fit-notice-subheadline">
+        <p class="field-help ai-fit-notice" id="ai-fit-notice-subheadline" hidden>Your subheadline is too long for this layout.</p>
         <label for="date">Date &amp; time</label>
-        <input id="date" name="date" maxlength="100" placeholder="Saturday, October 24 · 2–6 PM">
+        <input id="date" name="date" maxlength="100" placeholder="Saturday, October 24 · 2–6 PM" aria-describedby="ai-fit-notice-date">
+        <p class="field-help ai-fit-notice" id="ai-fit-notice-date" hidden>Your date and time text is too long for this layout.</p>
         <label for="place">Place</label>
-        <input id="place" name="place" maxlength="140" placeholder="Venue name and address">
+        <input id="place" name="place" maxlength="140" placeholder="Venue name and address" aria-describedby="ai-fit-notice-place">
+        <p class="field-help ai-fit-notice" id="ai-fit-notice-place" hidden>Your place text is too long for this layout.</p>
         <label for="body">Body <span>3 lines max on the flyer</span></label>
-        <textarea id="body" name="body" rows="3" maxlength="450" placeholder="The three things people need to know." aria-describedby="body-help"></textarea>
+        <textarea id="body" name="body" rows="3" maxlength="450" placeholder="The three things people need to know." aria-describedby="body-help ai-fit-notice-body"></textarea>
         <p class="field-help" id="body-help">Keep it short. Extra text is shortened in the preview; your full text stays here.</p>
+        <p class="field-help ai-fit-notice" id="ai-fit-notice-body" hidden>Your body text is too long for this layout.</p>
         <label for="cta">Call to action</label>
-        <input id="cta" name="cta" maxlength="100" placeholder="Reserve your spot today">
+        <input id="cta" name="cta" maxlength="100" placeholder="Reserve your spot today" aria-describedby="ai-fit-notice-cta">
+        <p class="field-help ai-fit-notice" id="ai-fit-notice-cta" hidden>Your call to action is too long for this layout.</p>
         <label for="contact">Contact line <span>required</span></label>
         <input id="contact" name="contact" maxlength="160" required placeholder="Website, email or phone number">
         <label for="qr-url">QR code link <span>optional</span></label>
@@ -100,6 +110,7 @@
       </form>
       <div class="brief-actions"><button type="button" id="save-brief">Save to My flyers</button><button type="button" class="quiet-button" id="export-brief">Export brief</button><label class="quiet-button import-label" for="import-brief">Import brief</label><input type="file" id="import-brief" accept="application/json,.json" hidden></div>
       <p class="session-note" id="save-status" role="status">Your current brief autosaves on this device.</p>
+      <p class="translation-review-note" id="brief-translation-note" hidden></p>
     </section>
     <section class="preview-panel" aria-labelledby="preview-title">
       <div class="preview-heading"><div><p class="eyebrow">02 / CHECK YOUR FLYER</p><h2 id="preview-title">Ready for the real world.</h2></div><span class="paper-size">8.5 × 11 IN</span></div>
@@ -128,10 +139,47 @@
         <p class="print-help">Choose Save as PDF, Letter, no margins, background graphics on.</p>
         <p class="print-help">Square keeps the headline, date and place clear. Story adds the body and call to action.</p>
         <p class="print-help" id="social-status" role="status">Social downloads are full-size PNG files, ready to post.</p>
+        <section class="ai-post" aria-labelledby="ai-post-title">
+          <div class="ai-post-head"><div><p class="eyebrow">SOCIAL COPY</p><h3 id="ai-post-title">Write the post.</h3></div><div class="ai-post-actions"><button type="button" id="ai-post-button" disabled>Write the post</button><button type="button" class="quiet-button" id="ai-post-cancel-button" hidden>Cancel</button></div></div>
+          <p class="field-help">Add the required headline and contact line first. AI uses the flyer wording, but never sends the contact line, customer details, QR link or photo.</p>
+          <p class="ai-write-status" id="ai-post-status" role="status" aria-live="polite"></p>
+          <div class="ai-post-results" id="ai-post-results" hidden>
+            <div class="ai-post-field">
+              <div class="ai-post-label"><label for="ai-instagram-caption">Instagram caption</label><span id="ai-instagram-count">0 / 2,200 characters</span></div>
+              <textarea id="ai-instagram-caption" rows="7" aria-describedby="ai-instagram-count ai-instagram-hook"></textarea>
+              <p id="ai-instagram-hook" class="field-help ai-copy"></p>
+              <div class="ai-post-copy-row"><button type="button" class="quiet-button" data-ai-copy="ai-instagram-caption" aria-label="Copy Instagram caption">Copy</button><span id="ai-instagram-copy-status" role="status" aria-live="polite"></span></div>
+            </div>
+            <div class="ai-post-field">
+              <div class="ai-post-label"><label for="ai-hashtags">Hashtags</label><span id="ai-hashtags-count">0 characters · 0 / 8 hashtags</span></div>
+              <textarea id="ai-hashtags" rows="3" spellcheck="false" aria-describedby="ai-hashtags-count"></textarea>
+              <div class="ai-post-copy-row"><button type="button" class="quiet-button" data-ai-copy="ai-hashtags" aria-label="Copy hashtags">Copy</button><span id="ai-hashtags-copy-status" role="status" aria-live="polite"></span></div>
+            </div>
+            <div class="ai-post-field">
+              <div class="ai-post-label"><label for="ai-facebook-description">Facebook event description</label><span id="ai-facebook-count">0 / 5,000 characters</span></div>
+              <textarea id="ai-facebook-description" rows="7" aria-describedby="ai-facebook-count"></textarea>
+              <div class="ai-post-copy-row"><button type="button" class="quiet-button" data-ai-copy="ai-facebook-description" aria-label="Copy Facebook event description">Copy</button><span id="ai-facebook-copy-status" role="status" aria-live="polite"></span></div>
+            </div>
+          </div>
+        </section>
       </div>
     </section>
+    <div class="ai-suggestion-actions ai-undo-row"><button type="button" class="quiet-button" id="ai-undo" hidden>Undo</button></div>
+    <section class="ai-suggestions" id="ai-spanish-preview" aria-labelledby="ai-spanish-title" hidden>
+      <div class="ai-suggestions-head"><div><p class="eyebrow">SPANISH VERSION</p><h2 id="ai-spanish-title">English | Spanish</h2></div></div>
+      <p class="translation-review-note" id="ai-spanish-review-note">Review before printing. Have someone who speaks Spanish check this translation.</p>
+      <p class="field-help">Compare every field. You can edit the Spanish text here. Dates, place and contact are copied exactly. Saving creates a separate draft and keeps your English flyer open.</p>
+      <div id="ai-spanish-fields"></div>
+      <div class="ai-suggestion-actions"><button type="button" id="ai-spanish-save">Save as Spanish draft</button></div>
+      <p id="ai-spanish-save-status" role="status" aria-live="polite"></p>
+    </section>
+    <section class="ai-suggestions" id="ai-fit-suggestions" aria-labelledby="ai-fit-title" hidden>
+      <div class="ai-suggestions-head"><div><p class="eyebrow">MAKE IT FIT</p><h2 id="ai-fit-title">Keep the meaning. Check the details.</h2></div><div class="ai-suggestion-actions"><button type="button" class="quiet-button" id="ai-fit-apply-all" aria-label="Use all shorter fields">Use this</button></div></div>
+      <p class="field-help">Compare Your text and Shorter. Check names, dates, times, addresses and prices. Use this at the top applies all shown fields; Use this below a field applies only that field.</p>
+      <div id="ai-fit-suggestion-fields"></div>
+    </section>
     <section class="ai-suggestions" id="ai-suggestions" aria-labelledby="ai-suggestions-title" hidden>
-      <div class="ai-suggestions-head"><div><p class="eyebrow">AI VERSIONS</p><h2 id="ai-suggestions-title">Check every word.</h2></div><div class="ai-suggestion-actions"><button type="button" class="quiet-button" id="ai-undo" hidden>Undo</button></div></div>
+      <div class="ai-suggestions-head"><div><p class="eyebrow">AI VERSIONS</p><h2 id="ai-suggestions-title">Check every word.</h2></div></div>
       <p class="field-help">Choose Use this at the top of a version for all 4 fields, or under a field for just that text. Check names, dates, places, and claims yourself.</p>
       <p class="field-help" id="ai-versions-status" role="status"></p>
       <div class="ai-comparison-list" id="ai-comparison-list"></div>

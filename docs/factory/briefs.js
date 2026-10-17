@@ -10,10 +10,29 @@
   let deletedActive = false;
   let timer = 0;
   const blockedKeys = new Set();
+  const REVIEW_NOTE = 'Review before printing. Have someone who speaks Spanish check this translation.';
+  let translation = null;
+  const originalBrief = window.factoryBrief;
+  // Carry translation metadata through open, autosave and JSON export without
+  // putting it in the flyer form or changing the English draft on separate save.
+  window.factoryBrief = Object.freeze({
+    collect() {
+      const payload = originalBrief.collect();
+      if (translation) payload.translation = JSON.parse(JSON.stringify(translation));
+      return payload;
+    },
+    apply(payload) {
+      validateImport(payload);
+      translation = payload.translation ? JSON.parse(JSON.stringify(payload.translation)) : null;
+      $('brief-translation-note').hidden = !translation;
+      $('brief-translation-note').textContent = translation ? REVIEW_NOTE : '';
+      originalBrief.apply(payload);
+    }
+  });
 
   const status = message => { $('save-status').textContent = message; };
   const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
-  const titleOf = payload => String(payload?.values?.headline || '').trim() || 'Untitled flyer';
+  const titleOf = payload => String(payload?.translation?.name || payload?.values?.headline || '').trim() || 'Untitled flyer';
 
   function read(key, fallback) {
     try {
@@ -95,7 +114,12 @@
     if (!write(BRIEFS_KEY, briefs)) return;
     activeId = entry.id;
     deletedActive = false;
-    if (!write(DRAFT_KEY, {updatedAt: now, activeId, payload: entry.payload})) return;
+    if (!write(DRAFT_KEY, {updatedAt: now, activeId, deletedActive, payload: entry.payload})) return;
+    // The draft now holds exactly this form. A debounced autosave queued just
+    // before this save (tapping Save blurs a field, which fires change) would
+    // only rewrite the same payload with a new time 300 ms later, so cancel it.
+    // On a failed write above it stays queued as the fallback.
+    clearTimeout(timer);
     demoMode = false;
     status(`“${titleOf(entry.payload)}” is saved in My flyers.`);
     renderList();
@@ -104,6 +128,17 @@
   function formatDate(value) {
     const date = new Date(value);
     return Number.isNaN(date.valueOf()) ? 'Saved on this device' : new Intl.DateTimeFormat(undefined, {month: 'short', day: 'numeric', year: 'numeric'}).format(date);
+  }
+
+  function saveSeparate(payload) {
+    try {
+      const copy = JSON.parse(JSON.stringify(validateImport(payload)));
+      const briefs = savedBriefs();
+      briefs.unshift({id: uid(), updatedAt: new Date().toISOString(), payload: copy});
+      if (!write(BRIEFS_KEY, briefs)) return false;
+      renderList();
+      return true;
+    } catch (_) { return false; }
   }
 
   function action(label, className, handler) {
@@ -128,6 +163,11 @@
       const heading = document.createElement('h3'); heading.textContent = titleOf(entry.payload);
       const date = document.createElement('p'); date.textContent = formatDate(entry.updatedAt);
       copy.append(heading, date);
+      if (entry.payload.translation) {
+        const note = document.createElement('p');
+        note.className = 'translation-review-note'; note.textContent = REVIEW_NOTE;
+        copy.append(note);
+      }
       const actions = document.createElement('div'); actions.className = 'brief-card-actions';
       actions.append(
         action('Open', 'brief-open', () => {
@@ -139,7 +179,8 @@
         action('Duplicate', 'quiet-button', () => {
           if (!demoMode && !flush({keepInLibrary: true})) return;
           const duplicate = {id: uid(), updatedAt: new Date().toISOString(), payload: JSON.parse(JSON.stringify(entry.payload))};
-          duplicate.payload.values.headline = `${titleOf(duplicate.payload)} copy`.slice(0, 140);
+          duplicate.payload.values.headline = `${String(duplicate.payload.values.headline || '').trim() || 'Untitled flyer'} copy`.slice(0, 140);
+          if (duplicate.payload.translation) duplicate.payload.translation.name = `${titleOf(entry.payload)} copy`.slice(0, 160);
           const next = savedBriefs(); next.unshift(duplicate);
           if (write(BRIEFS_KEY, next)) { activeId = duplicate.id; window.factoryBrief.apply(duplicate.payload); renderList(); status('Copy created and opened.'); }
         }),
@@ -184,6 +225,13 @@
   function validateImport(candidate) {
     const payload = candidate?.payload || candidate;
     if (!payload || payload.version !== 1 || !payload.values || typeof payload.values !== 'object') throw new Error('That file is not a Flyer Factory brief.');
+    if (payload.translation) {
+      const info = payload.translation;
+      if (info.language !== 'es' || info.reviewNote !== REVIEW_NOTE || typeof info.name !== 'string' || info.name.length > 160 || !info.social || typeof info.social !== 'object' || Array.isArray(info.social)) throw new Error('The Spanish draft details are damaged.');
+      for (const [field, limit] of Object.entries({instagramCaption: 2200, facebookDescription: 5000})) {
+        if (Object.hasOwn(info.social, field) && (typeof info.social[field] !== 'string' || info.social[field].length > limit)) throw new Error('The Spanish post is too long or damaged.');
+      }
+    }
     const maximums = {layout: 20, headline: 140, subheadline: 180, date: 100, place: 140, body: 450, cta: 100, contact: 160, qrUrl: 140, clientName: 100, clientEmail: 160, extraSizes: 2, extraEdits: 2};
     for (const [key, maximum] of Object.entries(maximums)) {
       if (Object.hasOwn(payload.values, key) && typeof payload.values[key] !== 'string') throw new Error(`The ${key} field is damaged.`);
@@ -207,6 +255,12 @@
     return payload;
   }
 
+  $('brief').addEventListener('factory:briefapplied', event => {
+    if (!event.detail || !Object.hasOwn(event.detail, 'translation')) return;
+    translation = event.detail.translation ? JSON.parse(JSON.stringify(event.detail.translation)) : null;
+    $('brief-translation-note').hidden = !translation;
+    $('brief-translation-note').textContent = translation ? REVIEW_NOTE : '';
+  });
   $('brief').addEventListener('input', autosave);
   $('brief').addEventListener('change', autosave);
   $('brief').addEventListener('factory:briefapplied', autosave);
@@ -251,5 +305,5 @@
   } else {
     status('Sample preview. Choose “Save to My flyers” to keep this sample and turn on autosave for your edits.');
   }
-  window.factoryBriefs = Object.freeze({saved: savedBriefs, saveCurrent, autosave, flush, validateImport, openDrawer});
+  window.factoryBriefs = Object.freeze({saved: savedBriefs, saveCurrent, saveSeparate, autosave, flush, validateImport, openDrawer, REVIEW_NOTE});
 })();
