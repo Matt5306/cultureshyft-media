@@ -40,14 +40,19 @@ Choose **Save to My flyers** to keep the job on this device. A received link or 
 
 AI is optional and only available in the factory. Customers see no AI controls on the order page. Start with Gemini on the iPad:
 
-1. Open [Google AI Studio](https://aistudio.google.com/) in Safari on the iPad.
-2. Sign in with your Google account.
-3. Tap **Get API key**, then **Create API key**. Follow any project-selection prompt and copy the key.
-4. Open [Flyer Factory](https://cultureshyftmedia.com/factory/), then tap **AI helper** near **My flyers**.
-5. Choose **Gemini**, paste the key, and keep the prefilled model unless you want another available model. **Show/Hide** lets you check the pasted key.
+1. Open [Flyer Factory](https://cultureshyftmedia.com/factory/), then tap **AI helper** near **My flyers**.
+2. Choose **Gemini**, then tap **Get a free Gemini key**. The key page opens in a new tab only when you tap the link.
+3. Sign in with your Google account. Tap **Create API key**, follow any project-selection prompt, and copy the key.
+4. Return to the Flyer Factory tab and paste the key into **API key**.
+5. Keep the prefilled model unless you want another available model. **Show/Hide** lets you check the pasted key.
 6. Tap **Test connection**. When you see **Connected. Gemini answered.**, tap **Save**.
 7. Choose an occasion and fill in the details you know. Tap **Write it for me** near Headline.
-8. Compare **Your text** and **Suggested**. Check facts, tone and spelling. Tap **Use this** for the whole set or one field. Nothing changes before that tap. **Undo** restores the values from immediately before your last acceptance; it is one level, not a history.
+8. The page moves to a review panel with **Bold**, **Warm**, and **Short** versions from one request. They sit side by side on wide screens and stack on narrow screens. Compare **Your text** and **Suggested**, checking facts, tone and spelling. Tap **Use this** at the top of your chosen version to apply its headline, subheadline, body and call to action. Tap **Use this** under one field to apply only that field. Nothing changes before that tap.
+9. Tap **Undo** to restore the exact values from immediately before your last acceptance. It is one level, not a history. A new AI reply keeps Undo available; your own edits clear it so Undo cannot overwrite your manual work.
+
+Every writing request includes the shared CultureShyft voice rules and the exact tagline, “Media made to move people.” AI can still make mistakes; check the result. If a reply has only 1 or 2 usable versions, the panel tells you and shows those choices. You can use one or tap **Write it for me** again. Failed or cancelled requests preserve your flyer and earlier choices; there is no automatic retry. Unaccepted versions stay only in this open page and disappear on reload.
+
+For another provider, choose it in **AI helper** and tap **Get an OpenAI key**, **Get a Claude key**, or **Get an OpenRouter key**. Sign in on the new tab, create and copy a key, return here, paste it, then tap **Test connection** and **Save**. Choosing **Local AI** shows a no-key note instead of a key link.
 
 A free Gemini key does not mean unlimited requests. Limits are per project and visible in AI Studio. A paid upgrade is separate; check its billing terms before enabling it. Google may use free-tier data to improve its products. Do not include private customer details in the flyer text you ask AI about.
 

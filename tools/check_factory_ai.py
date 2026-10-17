@@ -18,6 +18,14 @@ UNKNOWN_KEYS = tuple(prefix + 'UNKNOWN' + 'TEST' * 8
 FIELDS = ('headline', 'subheadline', 'body', 'cta')
 SUGGESTION = dict(zip(FIELDS, ('Meet your neighbors.', 'Make room for connection.',
                              'Local makers. Good food. Everyone is welcome.', 'Come through.')))
+VERSIONS = [dict(label=label, **{field: f'{label} {value}' for field, value in SUGGESTION.items()})
+            for label in ('Bold', 'Warm', 'Short')]
+KEY_URLS = {
+    'gemini': 'https://aistudio.google.com/apikey',
+    'openai': 'https://platform.openai.com/api-keys',
+    'claude': 'https://console.anthropic.com/settings/keys',
+    'openrouter': 'https://openrouter.ai/settings/keys',
+}
 PROVIDERS = {
     'gemini': ('Gemini', 'gemini-3.6-flash', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent'),
     'openai': ('OpenAI', 'gpt-6-luna', 'https://api.openai.com/v1/chat/completions'),
@@ -168,10 +176,38 @@ def check_ai(chrome, output_dir):
                 for field in ('headline', 'subheadline', 'date', 'place', 'body', 'cta'):
                     assert page.locator('#' + field).input_value() in user_text, f'{field} missing from AI prompt'
                 assert 'community' in user_text.lower(), 'Selected occasion missing'
+                system = (body['systemInstruction']['parts'][0]['text'] if provider == 'gemini'
+                          else body['system'] if provider == 'claude' else body['messages'][0]['content'])
+                voice = page.evaluate('factoryAI.BRAND_VOICE')
+                assert voice and voice in system, 'Generation does not reuse the exported brand voice'
+                for term in ('versions', 'Bold', 'Warm', 'Short', 'JSON'):
+                    assert term in system, f'Missing structured instruction: {term}'
+                if provider == 'gemini':
+                    schema = body['generationConfig']['responseSchema']
+                    versions = schema['properties']['versions']
+                    assert versions['minItems'] == versions['maxItems'] == 3
+                    assert set(versions['items']['required']) == {'label', *FIELDS}
+                    assert body['generationConfig']['maxOutputTokens'] >= 2000
+                elif provider != 'claude':
+                    assert body['response_format']['type'] == 'json_object'
 
         try:
             page.goto(checks.FACTORY_PAGE.as_uri()); ready()
             assert not calls, 'AI requested on page load'
+            # Compare actual exported prompt content with the authoritative brand
+            # sections, so edits to either source cannot silently drift apart.
+            voice_doc = (checks.ROOT / 'brand/brand-voice.md').read_text(encoding='utf-8')
+            voice = page.evaluate('factoryAI.BRAND_VOICE')
+            for section in ('Tagline (fixed)', 'Tone words', 'How we write'):
+                content = voice_doc.split('## ' + section + '\n', 1)[1].split('\n## ', 1)[0]
+                for line in content.strip().splitlines():
+                    rule = line.removeprefix('- ').replace('**', '').strip()
+                    if rule:
+                        assert rule in voice, f'Brand voice drift: {rule}'
+            for term in ('Media made to move people.', 'collateral', 'clients', 'Culture Shift',
+                         'game-changing', 'revolutionary', 'unleash', 'no emoji in headlines'):
+                assert term in voice, f'Brand voice missing required rule: {term}'
+            print('PASS AI card A: exported brand voice matches brand document, exact tagline and avoid-list')
             page.locator('#ai-write-button').click()
             expect(page.locator('#ai-settings-dialog')).to_be_visible()
             expect(page.locator('#ai-provider')).to_have_value('gemini')
@@ -198,6 +234,98 @@ def check_ai(chrome, output_dir):
             before = values()
             original_photo = page.evaluate('factoryBrief.collect().photo')
             assert not calls, 'AI requested while typing or saving'
+
+            # Three choices use one request in each adapter; all apply buttons
+            # operate on their own version and preserve the exact prior brief.
+            for provider in PROVIDERS:
+                count = len(calls)
+                choose(provider)
+                if provider == 'local':
+                    expect(page.locator('#ai-key-link')).not_to_be_visible()
+                    expect(page.locator('#ai-local-note')).to_contain_text('no key')
+                else:
+                    link = page.locator('#ai-key-link')
+                    expect(link).to_be_visible()
+                    expect(link).to_have_attribute('href', KEY_URLS[provider])
+                    expect(link).to_have_attribute('target', '_blank')
+                    assert {'noopener', 'noreferrer'} <= set(link.get_attribute('rel').split())
+                    assert page.evaluate('(p) => factoryAI.PROVIDERS[p].keyUrl', provider) == KEY_URLS[provider]
+                    if provider == 'gemini':
+                        expect(link).to_have_text('Get a free Gemini key')
+                save_settings()
+                assert len(calls) == count, 'Provider/key link setup caused network activity'
+                write(text=json.dumps({'versions': VERSIONS})); wait_done()
+                assert len(calls) == count + 1, 'Three versions must use exactly one request'
+                validate_request(provider, calls[-1])
+                assert values() == before
+                cards = page.locator('[data-ai-version]')
+                assert cards.count() == 3
+                for index, version in enumerate(VERSIONS):
+                    card = cards.nth(index)
+                    expect(card.locator('.ai-version-title')).to_have_text(version['label'])
+                    for field in FIELDS:
+                        expect(card.locator(f'[data-ai-field="{field}"] .ai-suggested')).to_have_text(version[field])
+                        card.locator(f'[data-ai-use="{field}"]').click()
+                        assert values() == {**before, field: version[field]}
+                        page.locator('#ai-undo').click()
+                        assert values() == before
+                    card.locator('[data-ai-use-all]').click()
+                    assert values() == {**before, **{field: version[field] for field in FIELDS}}
+                    page.locator('#ai-undo').click()
+                    assert values() == before
+                cards.nth(1).locator('[data-ai-use-all]').click()
+                write(text=json.dumps({'versions': VERSIONS})); wait_done()
+                expect(page.locator('#ai-undo')).to_be_visible()
+                page.locator('#ai-undo').click()
+                assert values() == before, 'New multi-version reply cleared the exact Undo snapshot'
+                leak_check()
+                print(f'PASS AI card A {provider}: key guidance, one request, 3 labelled choices, per-version/field apply and Undo')
+
+            for width, height in ((1440, 1200), (390, 844)):
+                page.set_viewport_size({'width': width, 'height': height})
+                boxes = [card.bounding_box() for card in page.locator('[data-ai-version]').all()]
+                if width == 1440:
+                    assert max(b['y'] for b in boxes) - min(b['y'] for b in boxes) < 2, 'Versions not side by side'
+                    assert boxes[0]['x'] < boxes[1]['x'] < boxes[2]['x']
+                else:
+                    assert boxes[0]['y'] < boxes[1]['y'] < boxes[2]['y'], 'Versions not stacked on phone'
+                assert page.locator('#ai-suggestions').evaluate('e => e.scrollWidth <= e.clientWidth + 1')
+                for button in page.locator('[data-ai-version] button').all():
+                    assert button.bounding_box()['height'] >= 44
+                page.locator('#ai-suggestions').screenshot(path=str(output_dir / f'ai-versions-{width}.png'))
+            page.set_viewport_size({'width': 1024, 'height': 1366})
+            print('PASS AI card A: side-by-side desktop and stacked phone choices, no overflow, touch targets')
+
+            # Partial, sparse, fenced and prose-wrapped replies preserve usable
+            # choices. Bad labels and key echoes must never become executable DOM.
+            choose('gemini'); save_settings()
+            for partial in ([VERSIONS[1]], [VERSIONS[0], VERSIONS[2]], [None, VERSIONS[1]]):
+                write(text='Here are your options:\n```json\n' + json.dumps({'versions': partial}) + '\n```\nDone.'); wait_done()
+                usable = [v for v in partial if v]
+                cards = page.locator('[data-ai-version]')
+                assert cards.count() == len(usable)
+                expect(page.locator('#ai-write-status')).to_contain_text(str(len(usable)))
+                assert values() == before
+                for index, version in enumerate(usable):
+                    expect(cards.nth(index).locator('.ai-version-title')).to_have_text(version['label'])
+            hostile_versions = [dict(label='<img src=x onerror="window.__aiHostile=1">' + FAKE_KEY,
+                                     **{field: '  ' + UNKNOWN_KEYS[0] + ' ' + 'A' * 600 + '  ' for field in FIELDS})
+                                for _ in range(3)]
+            write(text=json.dumps({'versions': hostile_versions})); wait_done()
+            for card in page.locator('[data-ai-version]').all():
+                for field, limit in zip(FIELDS, (140, 180, 450, 100)):
+                    text = card.locator(f'[data-ai-field="{field}"] .ai-suggested').text_content()
+                    assert len(text) == limit and text == text.strip()
+                    assert text.startswith('[key removed]')
+            assert UNKNOWN_KEYS[0] not in page.content()
+            assert page.locator('img[src="x"], [onerror]').count() == 0
+            assert page.evaluate('window.__aiHostile === undefined')
+            leak_check()
+            for invalid in ({'versions': []}, {'versions': [None, {'body': 'incomplete'}]}):
+                write(text=json.dumps(invalid)); wait_done()
+                expect(page.locator('#ai-write-status')).to_contain_text('JSON')
+                assert values() == before
+            print('PASS AI card A: partial/sparse replies, fences/prose, all version limits, label injection and key redaction')
 
             for provider in PROVIDERS:
                 choose(provider)
@@ -228,7 +356,7 @@ def check_ai(chrome, output_dir):
             assert values() == {**before, 'headline': SUGGESTION['headline']}
             page.locator('#ai-undo').click()
             assert values() == before
-            page.locator('#ai-use-all').click()
+            page.locator('[data-ai-use-all]').click()
             assert values() == {**before, **SUGGESTION}
             page.wait_for_function('''() => JSON.parse(localStorage.getItem('cultureshyft.factory.draft.v1'))
               .payload.values.headline === 'Meet your neighbors.' ''')
@@ -262,7 +390,7 @@ def check_ai(chrome, output_dir):
             page.locator('#ai-undo').click()
             assert values() == before
             # A later reply also preserves an already-established Undo snapshot.
-            page.locator('#ai-use-all').click()
+            page.locator('[data-ai-use-all]').click()
             write(); wait_done()
             expect(page.locator('#ai-undo')).to_be_visible()
             page.locator('#ai-undo').click()
@@ -274,7 +402,7 @@ def check_ai(chrome, output_dir):
             assert values() == {**before, 'headline': SUGGESTION['headline']}
             page.locator('#headline').fill(before['headline'])
             for field in FIELDS:
-                page.locator('#ai-use-all').click()
+                page.locator('[data-ai-use-all]').click()
                 page.locator('#' + field).fill('Manual edit')
                 expect(page.locator('#ai-undo')).to_be_hidden()
                 edited = values()
@@ -338,7 +466,7 @@ def check_ai(chrome, output_dir):
                     expect(page.locator('#' + field)).to_have_value('Echo [key removed]')
                     page.locator('#ai-undo').click()
                     assert values() == before
-                page.locator('#ai-use-all').click()
+                page.locator('[data-ai-use-all]').click()
                 page.wait_for_function('''() => JSON.parse(localStorage.getItem('cultureshyft.factory.draft.v1'))
                   .payload.values.cta === 'Echo [key removed]' ''')
                 page.locator('#save-brief').click()
@@ -369,7 +497,7 @@ def check_ai(chrome, output_dir):
                 leak_check()
                 page.locator('#ai-undo').click()
                 assert values() == before
-            page.locator('#ai-use-all').click()
+            page.locator('[data-ai-use-all]').click()
             assert all(values()[field] == markup + '[key removed]' for field in FIELDS)
             assert page.locator('script').count() == script_count
             assert page.locator('img[src="x"], [onerror]').count() == 0
