@@ -621,6 +621,8 @@ def main(argv: list[str] | None = None) -> int:
                 check_browser(chrome, output_dir)
                 from check_factory_orders import check_orders
                 check_orders(chrome, output_dir)
+                from check_factory_ai import check_ai
+                check_ai(chrome, output_dir)
                 _render_pdf(chrome, profile, output_dir, "invoice")
                 print("PASS invoice: 1-page Letter PDF")
 

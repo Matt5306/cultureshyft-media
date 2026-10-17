@@ -34,6 +34,41 @@ Use a JPG, PNG or WebP photo under 12 MB. Drag it in the preview and adjust zoom
 
 Choose **Save to My flyers** to keep the job on this device. A received link or demo does not replace your previous autosave until you explicitly save it. **Export brief** makes a JSON backup containing the full brief and photo; **Import brief** restores it on another device. Save a backup with each customer’s delivery files.
 
+## Connect your AI
+
+**AI helper → Gemini → paste key → Test connection → Save → Write it for me → review → Use this**
+
+AI is optional and only available in the factory. Customers see no AI controls on the order page. Start with Gemini on the iPad:
+
+1. Open [Google AI Studio](https://aistudio.google.com/) in Safari on the iPad.
+2. Sign in with your Google account.
+3. Tap **Get API key**, then **Create API key**. Follow any project-selection prompt and copy the key.
+4. Open [Flyer Factory](https://cultureshyftmedia.com/factory/), then tap **AI helper** near **My flyers**.
+5. Choose **Gemini**, paste the key, and keep the prefilled model unless you want another available model. **Show/Hide** lets you check the pasted key.
+6. Tap **Test connection**. When you see **Connected. Gemini answered.**, tap **Save**.
+7. Choose an occasion and fill in the details you know. Tap **Write it for me** near Headline.
+8. Compare **Your text** and **Suggested**. Check facts, tone and spelling. Tap **Use this** for the whole set or one field. Nothing changes before that tap. **Undo** restores the values from immediately before your last acceptance; it is one level, not a history.
+
+A free Gemini key does not mean unlimited requests. Limits are per project and visible in AI Studio. A paid upgrade is separate; check its billing terms before enabling it. Google may use free-tier data to improve its products. Do not include private customer details in the flyer text you ask AI about.
+
+| Choice | Setup |
+|---|---|
+| Gemini (recommended on iPad) | Google AI Studio key; starts with `gemini-3.6-flash`. |
+| OpenAI | Your OpenAI API key and API billing; starts with `gpt-6-luna`. A ChatGPT subscription is separate. |
+| Claude | Your Anthropic API key and API billing; starts with `claude-haiku-5-5`. |
+| OpenRouter | Your OpenRouter key; enter an available `provider/model` identifier and check that model’s costs. |
+| Local AI (LM Studio / Ollama) | Enter the model name shown in your server. LM Studio base: `http://localhost:1234/v1`; Ollama: `http://localhost:11434/v1`. No key is required. |
+
+Model names are editable because availability can change. For local AI, in LM Studio **turn on Enable CORS in the Developer tab and Start server**. For Ollama, set `OLLAMA_ORIGINS=https://cultureshyftmedia.com` then restart Ollama. Safari on iPad usually cannot reach a local `http://` server from an https page, so use Gemini on the iPad. `localhost` means the device running the browser, not another computer.
+
+Only tapping **Test connection** or **Write it for me** sends an AI request. Writing sends the selected occasion and headline, subheadline, date, place, body and call to action. It does not send the contact field, customer name/email, QR URL or photo. Anything private typed into an allowed text field would still be sent. Suggestions stay on this page until accepted; accepted copy uses the normal brief save/export flow.
+
+Your key stays in this browser and is only sent to the company you chose. Settings use one localStorage entry, `cultureshyft.factory.ai.v1`, shaped as `{provider, model, baseUrl, keys:{provider:key}}`. Keys are separate from briefs, exports and draft autosave. This is browser storage, not an encrypted password vault; use a trusted device/browser. If storage is blocked or full, the helper warns once and keeps settings in memory for this open session. Re-enter them after closing the page.
+
+To remove a saved key, open **AI helper**, choose its provider, tap **Forget my key**, and confirm. Repeat for other saved providers. This leaves your flyers intact. If storage cannot update, the helper tries removing its one AI settings entry and explains when other saved AI settings were also removed; current session settings remain available. If removal is blocked too, follow the warning and revoke the key with the provider. Revoke a compromised key at the provider as well. Clearing this site’s data removes AI settings along with other saved factory data, so export your work first.
+
+If a request fails, the helper explains the next step and preserves the form. For a rejected key, create a new one and test it. For a quota limit, wait a minute or try another model. For an unavailable model, enter one your account can use. Check your connection for offline errors. **Cancel** stops waiting; requests time out after 30 seconds and never retry automatically. A provider may already have processed a cancelled request. You can keep writing manually at any time.
+
 ## 3. Invoice and get paid
 
 **Confirm scope → invoice → deposit → work → balance on delivery**

@@ -1,0 +1,432 @@
+"""Factory AI acceptance: intercepted providers only, no server or real keys.
+
+Called unconditionally by the default check_factory.py run. Can also be run
+directly for a focused repair. All HTTP(S) traffic is intercepted, including
+unknown destinations. Browser evidence is retained in the existing scratch area.
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+import uuid
+
+AI_KEY = 'cultureshyft.factory.ai.v1'
+FAKE_KEY = 'sk-' + 'TEST' + 'FAKE' * 8  # built at runtime so the secret scanner never sees a key-shaped literal
+FIELDS = ('headline', 'subheadline', 'body', 'cta')
+SUGGESTION = dict(zip(FIELDS, ('Meet your neighbors.', 'Make room for connection.',
+                             'Local makers. Good food. Everyone is welcome.', 'Come through.')))
+PROVIDERS = {
+    'gemini': ('Gemini', 'gemini-3.6-flash', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent'),
+    'openai': ('OpenAI', 'gpt-6-luna', 'https://api.openai.com/v1/chat/completions'),
+    'claude': ('Claude', 'claude-haiku-5-5', 'https://api.anthropic.com/v1/messages'),
+    'openrouter': ('OpenRouter', 'example/test-model', 'https://openrouter.ai/api/v1/chat/completions'),
+    'local': ('Local AI', 'test-local-model', 'http://localhost:1234/v1/chat/completions'),
+}
+
+
+def check_ai(chrome, output_dir):
+    checks = sys.modules.get('__main__')
+    if not hasattr(checks, 'FACTORY_PAGE'):
+        import check_factory as checks
+    from playwright.sync_api import sync_playwright, expect
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    profile = checks.SCRATCH_DIR / f'ai-{uuid.uuid4().hex}'
+    profile.mkdir(parents=True)
+    calls, console, errors, held = [], [], [], []
+    mock = {'provider': 'gemini', 'mode': 'success', 'text': None}
+
+    def response(text):
+        if mock['provider'] == 'gemini':
+            return {'candidates': [{'content': {'parts': [{'text': text}]}, 'finishReason': 'STOP'}]}
+        if mock['provider'] == 'claude':
+            return {'content': [{'type': 'text', 'text': text}], 'stop_reason': 'end_turn'}
+        return {'choices': [{'message': {'content': text}, 'finish_reason': 'stop'}]}
+
+    def route_request(route):
+        request = route.request
+        if not request.url.startswith(('http:', 'https:')):
+            route.continue_()
+            return
+        calls.append({'url': request.url, 'headers': request.headers,
+                      'method': request.method, 'body': request.post_data_json})
+        mode = mock['mode']
+        if mode == 'offline':
+            route.abort('internetdisconnected')
+        elif mode == 'hold':
+            held.append(route)
+        elif isinstance(mode, int):
+            route.fulfill(status=mode, content_type='application/json', body=json.dumps({
+                'error': {'message': 'API key not valid ' + FAKE_KEY + ' AIzaSyTESTONLY0123456789abcdef0123456789', 'code': mode}}))
+        elif mode == 'blocked':
+            route.fulfill(json={'promptFeedback': {'blockReason': 'SAFETY'}, 'candidates': []})
+        elif mode == 'empty':
+            route.fulfill(json={'candidates': []})
+        elif mode == 'partial_blocked':
+            route.fulfill(json={'candidates': [{'content': {'parts': [{'text': json.dumps(SUGGESTION)}]}, 'finishReason': 'SAFETY'}]})
+        elif mode == 'invalid_response':
+            route.fulfill(content_type='application/json', body='not JSON')
+        else:
+            text = mock['text'] if mock['text'] is not None else json.dumps(SUGGESTION)
+            route.fulfill(json=response(text))
+
+    with sync_playwright() as pw:
+        context = pw.chromium.launch_persistent_context(
+            str(profile), executable_path=str(chrome), headless=True,
+            viewport={'width': 1024, 'height': 1366}, accept_downloads=True,
+            args=['--no-sandbox', '--disable-gpu', '--disable-background-networking',
+                  '--disable-component-update', '--allow-file-access-from-files'])
+        context.route('**/*', route_request)
+        page = context.pages[0]
+        page.on('console', lambda msg: console.append(msg.text))
+        page.on('pageerror', lambda error: errors.append(str(error)))
+
+        def ready():
+            page.evaluate('() => window.factoryReady')
+
+        def values():
+            return page.evaluate('() => factoryBrief.collect().values')
+
+        def leak_check():
+            assert FAKE_KEY not in page.content(), 'Key leaked into DOM markup'
+            assert FAKE_KEY not in page.locator('body').text_content(), 'Key leaked into DOM text'
+            assert FAKE_KEY not in json.dumps(page.evaluate('factoryBrief.collect()')), 'Key in brief'
+            storage = page.evaluate('''() => Object.fromEntries(Object.keys(localStorage)
+              .filter(k => k !== 'cultureshyft.factory.ai.v1').map(k => [k, localStorage.getItem(k)]))''')
+            assert FAKE_KEY not in json.dumps(storage), 'Key leaked outside AI settings'
+            assert all(FAKE_KEY not in call['url'] for call in calls), 'Key leaked into URL'
+            assert FAKE_KEY not in '\n'.join(console + errors), 'Key leaked into diagnostics'
+            assert not errors, errors
+
+        def open_settings():
+            if not page.locator('#ai-settings-dialog').is_visible():
+                page.locator('#open-ai-settings').click()
+
+        def choose(provider):
+            mock.update(provider=provider, mode='success', text=None)
+            open_settings()
+            page.locator('#ai-provider').select_option(provider)
+            model = PROVIDERS[provider][1]
+            if provider in ('openrouter', 'local'):
+                page.locator('#ai-model').fill(model)
+            else:
+                expect(page.locator('#ai-model')).to_have_value(model)
+            if provider == 'local':
+                expect(page.locator('#ai-base-url')).to_have_value('http://localhost:1234/v1')
+            else:
+                page.locator('#ai-api-key').fill(FAKE_KEY)
+            return model
+
+        def save_settings():
+            page.locator('#ai-save-settings').click()
+            expect(page.locator('#ai-settings-dialog')).not_to_be_visible()
+
+        def write(mode='success', text=None):
+            mock.update(mode=mode, text=text)
+            page.locator('#ai-write-button').click()
+
+        def wait_done():
+            expect(page.locator('#ai-write-button')).to_have_text('Write it for me', timeout=40000)
+
+        def validate_request(provider, call, is_test=False):
+            assert call['method'] == 'POST'
+            assert call['url'] == PROVIDERS[provider][2], call['url']
+            assert FAKE_KEY not in call['url']
+            headers, body = call['headers'], call['body']
+            if provider == 'gemini':
+                assert headers['x-goog-api-key'] == FAKE_KEY
+                assert 'authorization' not in headers
+                assert body['generationConfig']['responseMimeType'] == 'application/json'
+                assert body.get('systemInstruction') and body.get('contents')
+                user_text = body['contents'][0]['parts'][0]['text']
+            elif provider == 'claude':
+                assert headers['x-api-key'] == FAKE_KEY
+                assert headers['anthropic-version'] == '2023-06-01'
+                assert headers['anthropic-dangerous-direct-browser-access'] == 'true'
+                assert body['model'] == PROVIDERS[provider][1] and body.get('max_tokens')
+                assert body.get('system') and body['messages'][0]['role'] == 'user'
+                user_text = body['messages'][0]['content']
+            else:
+                if provider != 'local':
+                    assert headers['authorization'] == 'Bearer ' + FAKE_KEY
+                else:
+                    assert FAKE_KEY not in json.dumps(headers), 'Cloud key sent to Local AI'
+                assert body['model'] == PROVIDERS[provider][1]
+                assert [m['role'] for m in body['messages']] == ['system', 'user']
+                user_text = body['messages'][1]['content']
+            serialized = json.dumps(body)
+            for private in ('PRIVATE_CONTACT', 'PRIVATE_CLIENT', 'private-reply@example.com', 'private-qr.example', 'data:image/'):
+                assert private not in serialized, 'Private field sent to provider'
+            assert FAKE_KEY not in serialized
+            if is_test:
+                assert len(user_text) < 250, 'Test prompt should be tiny'
+                assert 'Original headline' not in user_text
+            else:
+                for field in ('headline', 'subheadline', 'date', 'place', 'body', 'cta'):
+                    assert page.locator('#' + field).input_value() in user_text, f'{field} missing from AI prompt'
+                assert 'community' in user_text.lower(), 'Selected occasion missing'
+
+        try:
+            page.goto(checks.FACTORY_PAGE.as_uri()); ready()
+            assert not calls, 'AI requested on page load'
+            page.locator('#ai-write-button').click()
+            expect(page.locator('#ai-settings-dialog')).to_be_visible()
+            expect(page.locator('#ai-provider')).to_have_value('gemini')
+            expect(page.locator('#ai-api-key')).to_have_attribute('type', 'password')
+            page.keyboard.press('Escape')
+            expect(page.locator('#ai-settings-dialog')).not_to_be_visible()
+            expect(page.locator('#ai-write-button')).to_be_focused()
+            page.locator('#preset').select_option('community-event')
+            original = {'headline': 'Original headline', 'subheadline': 'Original subhead',
+                        'date': 'October 24 at 2 PM', 'place': 'Community room',
+                        'body': 'Original body\nSecond line.', 'cta': 'Original action'}
+            for field, value in original.items():
+                page.locator('#' + field).fill(value)
+            page.locator('#contact').fill('PRIVATE_CONTACT')
+            page.locator('.order-details').evaluate('e => e.open = true')
+            page.locator('#clientName').fill('PRIVATE_CLIENT')
+            page.locator('#clientEmail').fill('private-reply@example.com')
+            page.locator('#qr-url').fill('https://private-qr.example/')
+            page.evaluate('''() => {
+              const canvas = document.createElement('canvas'); canvas.width = canvas.height = 2;
+              window.factoryPhoto.setState({dataUrl: canvas.toDataURL('image/png'), zoom: 1, focusX: .5, focusY: .5});
+            }''')
+            page.locator('#save-brief').click()
+            before = values()
+            original_photo = page.evaluate('factoryBrief.collect().photo')
+            assert not calls, 'AI requested while typing or saving'
+
+            for provider in PROVIDERS:
+                choose(provider)
+                count = len(calls)
+                if provider != 'local':
+                    page.locator('#ai-show-key').click()
+                    expect(page.locator('#ai-api-key')).to_have_attribute('type', 'text')
+                    leak_check()
+                    page.locator('#ai-show-key').click()
+                assert len(calls) == count, 'Changing settings sent a request'
+                page.locator('#ai-test-connection').click()
+                expect(page.locator('#ai-settings-status')).to_contain_text('Connected.')
+                validate_request(provider, calls[-1], is_test=True)
+                assert len(calls) == count + 1
+                save_settings()
+                write(); wait_done()
+                validate_request(provider, calls[-1])
+                assert values() == before, 'Suggestion altered form before acceptance'
+                expect(page.locator('#ai-suggestions')).to_be_visible()
+                for field in FIELDS:
+                    expect(page.locator(f'[data-ai-field="{field}"] .ai-current')).to_have_text(before[field])
+                    expect(page.locator(f'[data-ai-field="{field}"] .ai-suggested')).to_have_text(SUGGESTION[field])
+                leak_check()
+                print(f'PASS AI {provider}: request shape, explicit test/write, privacy, review before apply')
+
+            # Apply one field and undo; then apply all and undo, preserving every other control.
+            page.locator('[data-ai-use="headline"]').click()
+            assert values() == {**before, 'headline': SUGGESTION['headline']}
+            page.locator('#ai-undo').click()
+            assert values() == before
+            page.locator('#ai-use-all').click()
+            assert values() == {**before, **SUGGESTION}
+            page.wait_for_function('''() => JSON.parse(localStorage.getItem('cultureshyft.factory.draft.v1'))
+              .payload.values.headline === 'Meet your neighbors.' ''')
+            page.locator('#ai-undo').click()
+            assert values() == before
+            assert page.evaluate('factoryBrief.collect().photo') == original_photo
+            page.wait_for_function('''() => JSON.parse(localStorage.getItem('cultureshyft.factory.draft.v1'))
+              .payload.values.headline === 'Original headline' ''')
+            page.locator('#headline').fill('Edited after request')
+            page.locator('[data-ai-use="headline"]').click()
+            page.locator('#ai-undo').click()
+            expect(page.locator('#headline')).to_have_value('Edited after request')
+            page.locator('#headline').fill(before['headline'])
+            with page.expect_download() as download:
+                page.locator('#export-brief').click()
+            exported = output_dir / 'ai-brief.json'
+            download.value.save_as(str(exported))
+            assert FAKE_KEY not in exported.read_text(encoding='utf-8')
+            leak_check()
+            print('PASS AI: per-field/all acceptance, exact Undo, autosave, exported/saved/draft key isolation')
+
+            # Every adapter gets bad key, quota, offline, malformed output, cancellation and timeout.
+            for provider in ('gemini', 'openai', 'claude'):
+                choose(provider); save_settings()
+                for mode, pattern in ((400 if provider == 'gemini' else 401, r'key|accept'), (429, r'wait|minute|quota'),
+                                      ('offline', r'connect|offline|internet|reach'),
+                                      ('success', r'JSON|format|read')):
+                    write(mode, 'not JSON at all' if mode == 'success' else None); wait_done()
+                    expect(page.locator('#ai-write-status')).to_contain_text(re.compile(pattern, re.I))
+                    assert values() == before
+                    leak_check()
+                count = len(calls)
+                write('hold')
+                expect(page.locator('#ai-write-button')).to_contain_text('Working')
+                # DOM-dispatched clicks exercise the guard even when buttons are disabled.
+                page.locator('#ai-write-button').dispatch_event('click')
+                assert len(calls) == count + 1, 'Duplicate in-flight request'
+                page.locator('#ai-cancel-button').click(); wait_done()
+                expect(page.locator('#ai-write-status')).to_contain_text(re.compile('cancel', re.I))
+                assert values() == before
+                # Real timer verification: do not replace application timeout or AbortController.
+                write('hold'); wait_done()
+                expect(page.locator('#ai-write-status')).to_contain_text(re.compile('timed out|30 seconds', re.I))
+                assert values() == before
+                leak_check()
+                print(f'PASS AI {provider}: bad key, quota, offline, malformed JSON, single-flight cancel, real 30s timeout')
+
+            choose('gemini'); save_settings()
+            for mode, pattern in ((403, 'key|permission|access'), (404, 'model'), (503, 'try|busy|unavailable'),
+                                  ('blocked', 'blocked|safety'), ('empty', 'empty|answer|blocked'),
+                                  ('partial_blocked', 'blocked|safety'), ('invalid_response', 'JSON')):
+                write(mode); wait_done()
+                expect(page.locator('#ai-write-status')).to_contain_text(re.compile(pattern, re.I))
+                assert values() == before
+                leak_check()
+            write(text='```json\n' + json.dumps(SUGGESTION) + '\n```'); wait_done()
+            expect(page.locator('[data-ai-field="headline"] .ai-suggested')).to_have_text(SUGGESTION['headline'])
+            for invalid in ({'headline': 'Missing other fields'}, {**SUGGESTION, 'body': None}):
+                write(text=json.dumps(invalid)); wait_done()
+                expect(page.locator('#ai-write-status')).to_contain_text('JSON')
+                assert values() == before
+            long_text = {field: 'A' * 600 for field in FIELDS}
+            write(text=json.dumps(long_text)); wait_done()
+            for field, limit in zip(FIELDS, (140, 180, 450, 100)):
+                assert len(page.locator(f'[data-ai-field="{field}"] .ai-suggested').text_content()) == limit
+            # Provider echo and markup must never leak a key or execute as HTML.
+            hostile = {**SUGGESTION, 'headline': '<img src=x onerror=alert(1)>', 'body': 'Echo ' + FAKE_KEY}
+            write(text=json.dumps(hostile)); wait_done()
+            leak_check()
+            assert page.locator('#ai-suggestions img').count() == 0
+            print('PASS AI Gemini: 403/404/5xx, empty/blocked, fences, maxlengths, key echo and markup isolation')
+
+            # Dialog keyboard containment and touch layout at iPad and narrow phone widths.
+            open_settings()
+            for width, height in ((1024, 1366), (390, 844)):
+                page.set_viewport_size({'width': width, 'height': height})
+                for selector in ('#ai-provider', '#ai-api-key', '#ai-show-key', '#ai-test-connection', '#ai-save-settings'):
+                    box = page.locator(selector).bounding_box()
+                    assert box and box['height'] >= 44 and box['width'] >= 44, selector
+                assert page.locator('#ai-settings-dialog').evaluate('e => e.scrollWidth <= e.clientWidth + 1')
+                page.screenshot(path=str(output_dir / f'ai-settings-{width}.png'))
+                for _ in range(15):
+                    page.keyboard.press('Tab')
+                    # Native dialogs may cycle through browser chrome (body is
+                    # then active); no background page control may gain focus.
+                    assert page.evaluate("document.activeElement === document.body || document.activeElement.closest('#ai-settings-dialog') !== null")
+                page.locator('#headline').evaluate('e => e.focus()')
+                expect(page.locator('#headline')).not_to_be_focused()
+            page.keyboard.press('Escape')
+            expect(page.locator('#open-ai-settings')).to_be_focused()
+            page.set_viewport_size({'width': 1024, 'height': 1366})
+
+            # Forget needs a real confirmation, removes only the selected provider key.
+            open_settings()
+            page.locator('#ai-forget-key').click()
+            assert FAKE_KEY in page.evaluate('(k) => localStorage.getItem(k)', AI_KEY)
+            page.locator('#ai-forget-confirm-yes').click()
+            stored = json.loads(page.evaluate('(k) => localStorage.getItem(k)', AI_KEY))
+            assert not stored['keys'].get('gemini')
+            assert stored['keys'].get('openai') == FAKE_KEY
+            expect(page.locator('#ai-api-key')).to_have_value('')
+            page.keyboard.press('Escape')
+            count = len(calls)
+            page.reload(); ready()
+            assert len(calls) == count
+            page.locator('#ai-write-button').click()
+            expect(page.locator('#ai-settings-dialog')).to_be_visible()
+            page.keyboard.press('Escape')
+            print('PASS AI: accessible modal/touch targets, forget confirmation and reload recovery')
+
+            # Local failures explain exact server fixes, with no cloud key attached.
+            choose('local'); save_settings()
+            write('offline'); wait_done()
+            status = page.locator('#ai-write-status').inner_text()
+            for fragment in ('Enable CORS', 'Developer', 'Start server', 'OLLAMA_ORIGINS=https://cultureshyftmedia.com', 'restart Ollama', 'Safari', 'iPad', 'Gemini'):
+                assert fragment in status, fragment
+            validate_request('local', calls[-1])
+            leak_check()
+
+            # Credentials cannot become a model/URL, and local URL errors are
+            # resolved before fetch. Settings test shares the cancellation guard.
+            open_settings()
+            count = len(calls)
+            page.locator('#ai-model').fill(FAKE_KEY)
+            page.locator('#ai-test-connection').click()
+            expect(page.locator('#ai-settings-status')).to_contain_text('model')
+            assert len(calls) == count
+            page.locator('#ai-model').fill(PROVIDERS['local'][1])
+            for invalid_url in ('javascript:alert(1)', 'http://user:password@localhost:1234/v1',
+                                'http://localhost:1234/v1?key=' + FAKE_KEY,
+                                'http://localhost:1234/v1#secret'):
+                page.locator('#ai-base-url').fill(invalid_url)
+                page.locator('#ai-test-connection').click()
+                expect(page.locator('#ai-settings-status')).to_contain_text('base URL')
+                assert len(calls) == count
+            page.locator('#ai-base-url').fill('http://localhost:1234/v1')
+            mock['mode'] = 'hold'
+            page.locator('#ai-test-connection').click()
+            expect(page.locator('#ai-test-connection')).to_have_text('Working...')
+            page.locator('#ai-test-connection').dispatch_event('click')
+            assert len(calls) == count + 1
+            page.locator('#ai-test-cancel-button').click()
+            expect(page.locator('#ai-settings-status')).to_contain_text('Cancelled')
+            page.keyboard.press('Escape')
+            leak_check()
+            print('PASS AI: unsafe URL/model rejection, connection-test cancellation and single flight')
+
+            # Customer page must have neither UI nor AI resources.
+            count = len(calls)
+            page.goto((checks.ROOT / 'docs/order/index.html').as_uri()); ready()
+            assert not page.locator('script[src$="ai.js"], link[href$="ai.css"], #open-ai-settings, #ai-write-button, #ai-settings-dialog').count()
+            assert 'Write it for me' not in page.locator('body').inner_text()
+            assert len(calls) == count
+            print('PASS AI: local server guidance, order page isolation, no unsolicited requests')
+
+            # Storage blocked and quota-full both retain usable settings for this session.
+            for failure in ('blocked', 'full'):
+                recovery = context.new_page()
+                recovery.on('pageerror', lambda error: errors.append(str(error)))
+                recovery.on('console', lambda msg: console.append(msg.text))
+                recovery.add_init_script('''(() => {
+                  const originalGet = Storage.prototype.getItem;
+                  const originalSet = Storage.prototype.setItem;
+                  Storage.prototype.getItem = function(k) {
+                    if (k === 'cultureshyft.factory.ai.v1') {
+                      if (BLOCKED) throw new DOMException('blocked', 'SecurityError');
+                      return null;
+                    }
+                    return originalGet.call(this, k);
+                  };
+                  Storage.prototype.setItem = function(k, v) {
+                    if (k === 'cultureshyft.factory.ai.v1') throw new DOMException('full', 'QuotaExceededError');
+                    return originalSet.call(this, k, v);
+                  };
+                })();'''.replace('BLOCKED', 'true' if failure == 'blocked' else 'false'))
+                main_page, page = page, recovery
+                page.goto(checks.FACTORY_PAGE.as_uri()); ready()
+                choose('gemini')
+                page.locator('#ai-save-settings').click()
+                expect(page.locator('#ai-settings-dialog')).to_be_visible()
+                expect(page.locator('#ai-storage-warning')).to_contain_text(re.compile('session|open|memory', re.I))
+                page.locator('#ai-close-settings').click()
+                write(); wait_done()
+                expect(page.locator('#ai-suggestions')).to_be_visible()
+                open_settings()
+                expect(page.locator('#ai-api-key')).to_have_value(FAKE_KEY)
+                page.keyboard.press('Escape')
+                leak_check()
+                page.close(); page = main_page
+                print(f'PASS AI: {failure} storage, session fallback, warning, usable generation')
+            assert not errors, errors
+        except Exception as exc:
+            raise checks.CheckFailure(f'AI helper: {exc}') from exc
+        finally:
+            context.close()
+    print('PASS AI helper: all mocked provider and safety checks (none skipped)')
+
+
+if __name__ == '__main__':
+    import check_factory as checks
+    checks.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+    output = checks.SCRATCH_DIR / f'ai-evidence-{uuid.uuid4().hex}'
+    check_ai(checks.DEFAULT_CHROME, output)
