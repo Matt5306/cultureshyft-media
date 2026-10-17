@@ -391,6 +391,187 @@ def check_ai(chrome, output_dir):
                 if provider in ('gemini', 'openai', 'claude'):
                     print(f'PASS AI card B {provider}: native shape, schema, privacy, blank/partial reply rejection, edited-copy preservation and recovery')
 
+            # Card C: use the real fixed-viewport measurement, then exercise
+            # the same one-tap fit request through each native provider shape.
+            resize(page, 1024, 1366)
+            page.evaluate('() => document.fonts.ready')
+            card_c_layout = page.locator('#layout').input_value()
+            def settle_fit():
+                page.evaluate('() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))')
+            calls_before_overflow = len(calls)
+            page.locator('#layout').select_option('event')
+            page.locator('#headline').fill(('A welcoming community celebration with music, food, neighbors and practical support ' * 3)[:140])
+            page.locator('#date').fill('Saturday, October 24, 2026 at 2 PM — doors open at 1:30 PM — bring your whole family')
+            page.locator('#body').fill(('Bring your family to see Pastor Jay for music, food and $20 family passes on October 24, 2026. ' * 6)[:450])
+            settle_fit()
+            page.wait_for_function("() => window.factoryGetOverflowingFields().includes('body')")
+            expect(page.locator('#ai-fit-button')).to_be_visible()
+            assert not page.locator('#ai-fit-notice-body').is_hidden()
+            fit_before = {field: page.locator('#' + field).input_value()
+                          for field in ('headline', 'subheadline', 'date', 'place', 'body', 'cta')}
+            fit_fields = page.evaluate('factoryGetOverflowingFields()')
+            assert {'body', 'date'} <= set(fit_fields) <= {'headline', 'subheadline', 'date', 'place', 'body', 'cta'}
+            assert len(calls) == calls_before_overflow, 'Overflow detection made a request before the tap'
+            assert page.evaluate("""() => {
+              const first = window.factoryGetOverflowingFields(); first.length = 0;
+              return window.factoryGetOverflowingFields().includes('body');
+            }"""), 'Returned overflowing-field list must not mutate the measurement result'
+            for field in fit_before:
+                page.locator('#' + field).fill('Short.')
+            settle_fit()
+            page.wait_for_function("() => !window.factoryGetOverflowingFields().length")
+            expect(page.locator('#ai-fit-button')).to_be_hidden()
+            for field, value in fit_before.items():
+                page.locator('#' + field).fill(value)
+            settle_fit()
+            page.wait_for_function("() => ['body', 'date'].every(f => window.factoryGetOverflowingFields().includes(f))")
+            expect(page.locator('#ai-fit-button')).to_be_visible()
+            fit_fields = page.evaluate('factoryGetOverflowingFields()')
+            for provider in ('gemini', 'openai', 'claude'):
+                choose(provider); save_settings()
+                count = len(calls)
+                shorter = {field: (fit_before[field][:max(1, min(20, len(fit_before[field])))] or 'Short') for field in fit_fields}
+                if provider == 'gemini':
+                    shorter['date'] = 'October 24, 2026 at 2 PM; doors 1:30 PM'
+                    shorter['body'] = 'See Pastor Jay October 24, 2026. Family passes: $20.'
+                else:
+                    shorter['date'] = 'October 25, 2026 at 2 PM'
+                mock.update(mode='success', text='```json\n' + json.dumps(shorter) + '\n```')
+                page.locator('#ai-fit-button').click()
+                expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+                assert len(calls) == count + 1
+                call = calls[-1]; headers, body = call['headers'], call['body']
+                assert call['url'] == PROVIDERS[provider][2]
+                user_text = (body['contents'][0]['parts'][0]['text'] if provider == 'gemini'
+                             else body['messages'][0 if provider == 'claude' else 1]['content'])
+                sent = json.loads(user_text.split('Requested fields: ', 1)[1])
+                assert set(sent) == set(fit_fields)
+                assert all(sent[field]['text'] == fit_before[field] and sent[field]['character_budget'] > 0
+                           for field in fit_fields)
+                serialized = json.dumps(body)
+                for private in ('PRIVATE_CONTACT', 'PRIVATE_CLIENT', 'private-reply@example.com', 'private-qr.example', 'data:image/'):
+                    assert private not in serialized, 'Fit request sent private data'
+                if provider == 'gemini':
+                    assert set(body['generationConfig']['responseSchema']['properties']) == set(fit_fields)
+                    assert set(body['generationConfig']['responseSchema']['required']) == set(fit_fields)
+                elif provider == 'claude':
+                    assert headers['x-api-key'] == FAKE_KEY
+                    assert headers['anthropic-dangerous-direct-browser-access'] == 'true'
+                else:
+                    assert headers['authorization'] == 'Bearer ' + FAKE_KEY
+                assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+                expect(page.locator('#ai-fit-suggestions')).to_be_visible()
+                date_row = page.locator('[data-ai-fit-field="date"]')
+                expect(date_row.locator('.ai-current')).to_have_text(fit_before['date'])
+                expect(date_row.locator('.ai-suggested')).to_have_text(shorter['date'])
+                expect(date_row.locator('.ai-fit-counts')).to_contain_text(str(len(fit_before['date'])))
+                if provider == 'gemini':
+                    expect(page.locator('[data-ai-fit-field="body"] .ai-suggested')).to_contain_text('Pastor Jay')
+                    expect(page.locator('[data-ai-fit-field="body"] .ai-suggested')).to_contain_text('$20')
+                    # Same numbers (repeats dropped): no numbers warning.
+                    expect(page.locator('[data-ai-fit-warning="date"]')).to_have_count(0)
+                    expect(page.locator('[data-ai-fit-warning="body"]')).to_have_count(0)
+                else:
+                    # A changed date is shown with a plain numbers warning, never applied.
+                    expect(page.locator('[data-ai-fit-warning="date"]')).to_have_text(re.compile('Numbers changed'))
+                first_field = next(field for field in fit_fields if field != 'date')
+                page.locator(f'[data-ai-fit-use="{first_field}"]').click()
+                expect(page.locator('#ai-undo')).to_be_visible()
+                after_first = {field: page.locator('#' + field).input_value() for field in fit_before}
+                page.locator('[data-ai-fit-use="date"]').click()
+                page.locator('#ai-undo').click()
+                assert {field: page.locator('#' + field).input_value() for field in fit_before} == after_first
+                page.locator('[data-ai-fit-use="date"]').click()
+                expect(page.locator('#date')).to_have_value(shorter['date'])
+                page.locator('#ai-undo').click()
+                assert {field: page.locator('#' + field).input_value() for field in fit_before} == after_first
+                for field, value in fit_before.items(): page.locator('#' + field).fill(value)
+                page.wait_for_function("() => ['body', 'date'].every(f => window.factoryGetOverflowingFields().includes(f))")
+            # A later reply is review-only: it never clears the Undo from the
+            # last accepted shorter value.
+            mock.update(mode='success', text=json.dumps({field: fit_before[field][:20] or 'Short' for field in fit_fields}))
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            page.locator(f'[data-ai-fit-use="{next(field for field in fit_fields if field != "date")}"]').click()
+            expect(page.locator('#ai-undo')).to_be_visible()
+            settle_fit()
+            next_fields = page.evaluate('factoryGetOverflowingFields()')
+            mock.update(mode='success', text=json.dumps({field: page.locator('#' + field).input_value()[:20] or 'Short' for field in next_fields}))
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            expect(page.locator('#ai-undo')).to_be_visible()
+            page.locator('#ai-undo').click()
+            assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+            # Manual edits after a preview are never overwritten by Use this.
+            mock.update(mode='success', text=json.dumps({field: fit_before[field][:20] or 'Short' for field in fit_fields}))
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            stale_field = next(field for field in fit_fields if field != 'date')
+            page.locator('#' + stale_field).fill('Manual change that must remain.')
+            page.locator(f'[data-ai-fit-use="{stale_field}"]').click()
+            expect(page.locator('#ai-fit-status')).to_contain_text('changed after this suggestion')
+            expect(page.locator('#' + stale_field)).to_have_value('Manual change that must remain.')
+            for field, value in fit_before.items(): page.locator('#' + field).fill(value)
+            page.wait_for_function("() => ['body', 'date'].every(f => window.factoryGetOverflowingFields().includes(f))")
+            # A malformed result or a cancelled fit request leaves both the
+            # prior preview and the flyer form unchanged.
+            prior_preview = page.locator('#ai-fit-suggestion-fields').inner_text()
+            mock.update(mode='success', text='not JSON')
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            expect(page.locator('#ai-fit-status')).to_contain_text('JSON')
+            assert page.locator('#ai-fit-suggestion-fields').inner_text() == prior_preview
+            assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+            # Empty or whitespace-only shorter values are rejected as a whole
+            # reply: no field can be blanked, and the earlier preview stays.
+            for empty_value in ('', ' ' + chr(9) + chr(10)):
+                reply = {field: 'Short ' + field for field in fit_fields}
+                reply['date'] = empty_value
+                mock.update(mode='success', text=json.dumps(reply))
+                page.locator('#ai-fit-button').click()
+                expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+                expect(page.locator('#ai-fit-status')).to_contain_text('empty shorter version')
+                assert page.locator('#ai-fit-suggestion-fields').inner_text() == prior_preview, 'Empty fit reply replaced the earlier preview'
+                assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before, 'Empty fit reply changed the form'
+            mock.update(mode='hold', text=None)
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Working...')
+            page.locator('#ai-fit-cancel-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            expect(page.locator('#ai-fit-status')).to_contain_text('Cancelled')
+            assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+            # Use this (all) writes every shown field with its own distinct
+            # replacement, re-measures, and one Undo restores the exact values.
+            distinct = {field: f'Fit {field} {index}' for index, field in enumerate(fit_fields)}
+            mock.update(mode='success', text=json.dumps(distinct))
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            expect(page.locator('#ai-fit-apply-all')).to_have_attribute('aria-label', 'Use all shorter fields')
+            page.locator('#ai-fit-apply-all').click()
+            applied = {field: page.locator('#' + field).input_value() for field in fit_before}
+            assert applied == {**fit_before, **distinct}, f'Use all skipped or altered a field: {applied}'
+            expect(page.locator('#ai-fit-status')).to_contain_text('It fits this layout')
+            page.locator('#ai-undo').click()
+            assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+            # Applying every shown field can still leave an overfull layout; it
+            # must say so plainly and retain one exact Undo snapshot.
+            unchanged = {field: fit_before[field] for field in fit_fields}
+            mock.update(mode='success', text=json.dumps(unchanged))
+            page.locator('#ai-fit-button').click()
+            expect(page.locator('#ai-fit-button')).to_have_text('Make it fit', timeout=40000)
+            page.locator('#ai-fit-apply-all').click()
+            expect(page.locator('#ai-fit-status')).to_contain_text('Some text still does not fit')
+            page.locator('#ai-undo').click()
+            assert {field: page.locator('#' + field).input_value() for field in fit_before} == fit_before
+            # Restore the shared brief so later checks compare against the
+            # same exact 'before' values they captured (test isolation).
+            page.locator('#layout').select_option(card_c_layout)
+            for field in fit_before:
+                page.locator('#' + field).fill(before[field])
+            settle_fit()
+            assert values() == before, 'Card C did not restore the shared brief'
+            print('PASS AI card C: real overflow trigger, tap-only field-minimal requests, all native adapters, preview/apply-all/Undo, empty-reply rejection, numbers warning and changed-date review')
+
             for width, height in ((1440, 1200), (390, 844)):
                 resize(page, width, height)
                 # Measure all cards in one layout snapshot so a late reflow

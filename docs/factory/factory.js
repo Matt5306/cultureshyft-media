@@ -14,6 +14,14 @@
   let uploadVersion = 0;
   let fontFailed = false;
   let shortened = [];
+  let markedlyShrunk = [];
+  // Offer shortening when fitting reduces type by at least 25% from the
+  // layout's intended size. Observe the existing fit pass; never refit here.
+  const MARKED_SHRINK_RATIO = 0.75;
+  const shortenFields = ['headline', 'subheadline', 'date', 'place', 'body', 'cta'];
+  window.factoryGetOverflowingFields = () => ready
+    ? shortenFields.filter(field => $(field).value.trim() && (shortened.includes(field) || markedlyShrunk.includes(field)))
+    : [];
   let qrInvalid = '';
   let renderQueued = false;
   const runtimeErrors = window.factoryRuntimeErrors = window.factoryRuntimeErrors || [];
@@ -91,6 +99,7 @@
         return fits(element);
       }, 10);
       element.style.fontSize = `${size}px`;
+      if (size <= high * MARKED_SHRINK_RATIO) markedlyShrunk.push(element.dataset.fit);
     }
     if (!fits(element)) shorten(element, text);
   }
@@ -155,6 +164,7 @@
       $('qr-help').textContent = qrInvalid;
     }
     shortened = [];
+    markedlyShrunk = [];
     const minimums = {headline: 26, subheadline: 16, date: 18, place: 16, cta: 18, contact: 12};
     fields.forEach(key => {
       const element = $(`flyer-${key}`);
@@ -172,6 +182,7 @@
     updateNextStep();
     scalePreview();
     publishReport();
+    document.dispatchEvent(new CustomEvent('factory:fitupdated'));
   }
 
   function queueRender() {

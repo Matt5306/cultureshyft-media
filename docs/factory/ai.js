@@ -5,6 +5,11 @@
   const STORAGE_KEY = 'cultureshyft.factory.ai.v1';
   const TIMEOUT_MS = 30000;
   const FIELD_LIMITS = Object.freeze({headline: 140, subheadline: 180, body: 450, cta: 100});
+  // Conservative fallbacks used when a layout has no published copy budget.
+  // They are deliberately below form maxlength values: the goal is a readable
+  // flyer, not merely a value the input control can hold.
+  const FIT_FIELDS = Object.freeze(['headline', 'subheadline', 'date', 'place', 'body', 'cta']);
+  const FIT_FALLBACK_BUDGETS = Object.freeze({headline: 48, subheadline: 80, date: 44, place: 70, body: 220, cta: 50});
   const POST_LIMITS = Object.freeze({instagramCaption: 2200, instagramHook: 125, hashtags: 8, facebookAim: 1000, facebookDescription: 5000});
   const PROVIDERS = Object.freeze({
     gemini: Object.freeze({label: 'Gemini', adapter: 'gemini', model: 'gemini-3.6-flash', modelPlaceholder: '', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', keyRequired: true, keyUrl: 'https://aistudio.google.com/apikey', keyLinkText: 'Get a free Gemini key', keyHowTo: 'Sign in, choose Create API key, copy the key, then paste it here.'}),
@@ -63,6 +68,12 @@ Use no emoji by default. Use no exclamation marks in body copy. Copy every suppl
   let connectionTestVersion = 0;
   let suggestions = null;
   let suggestionSnapshot = null;
+  let fitSuggestions = null;
+  let fitSnapshot = null;
+  let fitExpectedValues = null;
+  let fitLayout = '';
+  let fitRequestVersion = 0;
+  let fitApplyVersion = 0;
   let undoValues = null;
   let dialogKeys = {};
   let dialogProvider = 'gemini';
@@ -229,6 +240,13 @@ Use no emoji by default. Use no exclamation marks in body copy. Copy every suppl
     $('ai-post-cancel-button').hidden = !(busy && kind === 'post');
     $('ai-test-connection').textContent = busy && kind === 'test' ? 'Working...' : 'Test connection';
     $('ai-test-cancel-button').hidden = !(busy && kind === 'test');
+    const fitButton = $('ai-fit-button');
+    const fitCancel = $('ai-fit-cancel-button');
+    if (fitButton) {
+      fitButton.disabled = busy;
+      fitButton.textContent = busy && kind === 'fit' ? 'Working...' : 'Make it fit';
+    }
+    if (fitCancel) fitCancel.hidden = !(busy && kind === 'fit');
   }
   async function withRequest(kind, task) {
     if (activeRequest) throw new AIError('busy');
@@ -271,6 +289,7 @@ Use no emoji by default. Use no exclamation marks in body copy. Copy every suppl
     if (code === 'model_invalid') return 'That model name is not safe to use. Copy only the model name from your provider.';
     if (code === 'base_invalid') return 'Enter the Local AI base URL without a key, query, or # section. Use http://localhost:1234/v1 for LM Studio or http://localhost:11434/v1 for Ollama.';
     if (code === 'blocked') return `${label} blocked the content or returned no usable text. Remove sensitive details and try again.`;
+    if (code === 'empty_fit') return `${label} returned an empty shorter version. Your flyer and any earlier suggestions are unchanged. Try again or choose another model.`;
     if (code === 'empty_post') return `${label} returned an empty caption or description. Your earlier post is unchanged. Try again or choose another model.`;
     if (code === 'malformed_response' || code === 'invalid_json') return `${label} answered, but the answer was not valid JSON. Try again or choose another model.`;
     if (code === 'http') {
@@ -381,6 +400,51 @@ Call to action: ${safeBrief.cta}`;
     const user = `Write the Instagram caption, hashtags and Facebook event description using only these flyer fields. Preserve supplied wording and copy every date, time and address exactly. Do not invent missing details.\nFlyer fields: ${JSON.stringify(snapshot)}`;
     return {system: POST_SYSTEM_PROMPT, user, test: false, schema: POST_SCHEMA, maxOutputTokens: 2400};
   }
+  function overflowingFields() {
+    const reported = typeof window.factoryGetOverflowingFields === 'function' ? window.factoryGetOverflowingFields() : [];
+    return FIT_FIELDS.filter(field => Array.isArray(reported) && reported.includes(field));
+  }
+  function fitFieldSnapshot(fields = FIT_FIELDS) {
+    return Object.fromEntries(fields.map(field => [field, $(field).value]));
+  }
+  function fitPrompts(fields, snapshot) {
+    const layout = $('layout').selectedOptions[0]?.textContent || $('layout').value;
+    const requested = Object.fromEntries(fields.map(field => [field, {
+      text: snapshot[field],
+      character_budget: FIT_FALLBACK_BUDGETS[field]
+    }]));
+    const user = `Shorten only the requested flyer fields. Preserve meaning. Keep every date, time, address, price and name unchanged. Do not add facts. Return strict JSON keyed by field name; each value must be the shorter text.\nLayout: ${layout}\nRequested fields: ${JSON.stringify(requested)}`;
+    // Match the existing adapters' Gemini responseSchema subset. Reject/ignore
+    // unrequested fields locally; additionalProperties belongs to JSON Schema.
+    const schema = {type: 'OBJECT', required: fields, properties: Object.fromEntries(fields.map(field => [field, {type: 'STRING'}]))};
+    return {system: `You shorten flyer copy for CultureShyft Media.\n${BRAND_VOICE}\nReturn only valid JSON, without commentary or code fences. Preserve meaning and keep dates, times, addresses, prices and names unchanged.`, user, test: false, schema, maxOutputTokens: 900};
+  }
+  function parseFitSuggestion(raw, fields, config) {
+    const parsed = parseJSONObject(raw);
+    // Some providers wrap a valid keyed reply; accepting this wrapper keeps the
+    // result reviewable while never accepting fields we did not request.
+    const candidate = parsed.fields && typeof parsed.fields === 'object' && !Array.isArray(parsed.fields) ? parsed.fields : parsed;
+    const result = {};
+    for (const field of fields) {
+      if (!Object.hasOwn(candidate, field) || typeof candidate[field] !== 'string') throw new AIError('invalid_json');
+      const maxlength = Number($(field).maxLength);
+      result[field] = scrubSuggestion(candidate[field], config).slice(0, maxlength > 0 ? maxlength : FIT_FALLBACK_BUDGETS[field]).trim();
+      // An empty "shorter" value would blank the field (even the date) on
+      // Use this, so the whole reply is rejected and nothing is replaced.
+      if (!result[field]) throw new AIError('empty_fit');
+    }
+    return result;
+  }
+  // Numbers carry dates, times, addresses and prices. Flag any added, removed
+  // or changed number so Mark checks it; the reply is still shown, never applied.
+  function numbersDiffer(original, shorter) {
+    // Compare distinct numbers: dropping a repeated mention is fine.
+    const numbers = text => [...new Set((String(text).match(/\d+/g) || []).map(Number))].sort((a, b) => a - b).join(',');
+    return numbers(original) !== numbers(shorter);
+  }
+  function fitPreviewIsCurrent(fields) {
+    return Boolean(fitExpectedValues && fitLayout === $('layout').value && fields.every(field => fitExpectedValues[field] === $(field).value));
+  }
   const testPrompts = () => ({system: 'This is a connection test. Return JSON only.', user: 'Return exactly {"ok":true}.', test: true});
 
   function renderSuggestions() {
@@ -396,9 +460,7 @@ Call to action: ${safeBrief.cta}`;
       card.append(title, useAll);
       for (const field of Object.keys(FIELD_LIMITS)) {
       const row = document.createElement('article'); row.className = 'ai-comparison'; row.dataset.aiField = field;
-      const heading = document.createElement('h4'); heading.textContent = labels[field];
-      const current = document.createElement('p'); current.className = 'ai-copy ai-current'; current.textContent = suggestionSnapshot[field] || '—';
-      const suggested = document.createElement('p'); suggested.className = 'ai-copy ai-suggested'; suggested.textContent = version[field] || '—';
+      const {heading, current, suggested} = comparisonParts('h4', labels[field], suggestionSnapshot[field], version[field]);
       const use = document.createElement('button'); use.type = 'button'; use.className = 'quiet-button'; use.dataset.aiUse = field; use.textContent = 'Use this';
       use.setAttribute('aria-label', `Use this ${version.label} ${labels[field].toLowerCase()}`);
       use.addEventListener('click', () => applySuggestion(index, [field]));
@@ -408,6 +470,118 @@ Call to action: ${safeBrief.cta}`;
     });
     $('ai-suggestions').hidden = false;
     $('ai-undo').hidden = !undoValues;
+  }
+  // Both AI panels render provider strings through these same text-only nodes.
+  // No provider value becomes markup or an attribute.
+  function comparisonParts(headingTag, label, currentValue, suggestedValue) {
+    const heading = document.createElement(headingTag); heading.textContent = label;
+    const current = document.createElement('p'); current.className = 'ai-copy ai-current'; current.textContent = currentValue || '—';
+    const suggested = document.createElement('p'); suggested.className = 'ai-copy ai-suggested'; suggested.textContent = suggestedValue || '—';
+    return {heading, current, suggested};
+  }
+  function updateFitAvailability() {
+    const fields = overflowingFields();
+    const button = $('ai-fit-button');
+    if (button) button.hidden = !fields.length;
+    for (const field of FIT_FIELDS) {
+      const notice = $(`ai-fit-notice-${field}`);
+      if (notice) notice.hidden = !fields.includes(field);
+    }
+    return fields;
+  }
+  function fitLabel(field) {
+    return ({headline: 'Headline', subheadline: 'Subheadline', date: 'Date and time', place: 'Place', body: 'Body', cta: 'Call to action'})[field] || field;
+  }
+  function renderFitSuggestions() {
+    const list = $('ai-fit-suggestion-fields');
+    list.replaceChildren();
+    for (const field of Object.keys(fitSuggestions)) {
+      const row = document.createElement('article'); row.className = 'ai-fit-comparison'; row.dataset.aiFitField = field;
+      const {heading: title, current, suggested: shorter} = comparisonParts('h3', fitLabel(field), fitSnapshot[field], fitSuggestions[field]);
+      const counts = document.createElement('p'); counts.className = 'ai-fit-counts'; counts.textContent = `Your text: ${fitSnapshot[field].length} characters · Shorter: ${fitSuggestions[field].length} characters`;
+      const parts = [title, current, shorter, counts];
+      if (numbersDiffer(fitSnapshot[field], fitSuggestions[field])) {
+        const warning = document.createElement('p'); warning.className = 'ai-fit-warning'; warning.dataset.aiFitWarning = field;
+        warning.textContent = 'Numbers changed. Check dates, times, addresses and prices before you use this.';
+        parts.push(warning);
+      }
+      const use = document.createElement('button'); use.type = 'button'; use.className = 'quiet-button'; use.dataset.aiFitUse = field; use.textContent = 'Use this';
+      use.setAttribute('aria-label', `Use this shorter ${fitLabel(field).toLowerCase()}`);
+      use.addEventListener('click', () => applyFitSuggestion([field]));
+      row.append(...parts, use); list.append(row);
+    }
+    $('ai-fit-apply-all').hidden = false;
+    $('ai-fit-suggestions').hidden = false;
+    $('ai-undo').hidden = !undoValues;
+  }
+  function setFitField(field, value) {
+    const input = $(field);
+    const limit = Number(input.maxLength);
+    input.value = String(value).slice(0, limit > 0 ? limit : FIT_FALLBACK_BUDGETS[field]);
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+  }
+  function clearUndo() {
+    fitApplyVersion++;
+    undoValues = null;
+    $('ai-undo').hidden = true;
+  }
+  function applyFitSuggestion(fields) {
+    const allowed = fields.filter(field => Object.hasOwn(fitSuggestions || {}, field));
+    if (!allowed.length) return;
+    if (!fitPreviewIsCurrent(allowed)) {
+      $('ai-fit-status').textContent = 'The flyer text or layout changed after this suggestion. Tap Make it fit again to review a new shorter version.';
+      return;
+    }
+    // Keep every editable flyer field, so Undo restores the exact state at the
+    // moment Mark chose a shorter value even when only one field was used.
+    const previous = fitFieldSnapshot();
+    allowed.forEach(field => setFitField(field, fitSuggestions[field]));
+    allowed.forEach(field => { fitExpectedValues[field] = $(field).value; });
+    undoValues = previous;
+    const applyVersion = ++fitApplyVersion;
+    $('ai-undo').hidden = false;
+    $('ai-fit-status').textContent = 'Shorter text used. Checking the layout now; Undo is available.';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (applyVersion !== fitApplyVersion) return;
+      const still = overflowingFields();
+      $('ai-fit-status').textContent = still.length
+        ? `Some text still does not fit: ${still.map(fitLabel).join(', ')}. Shorten it more or choose another layout. Undo is available.`
+        : 'Shorter text used. It fits this layout. Undo is available.';
+    }));
+  }
+  async function makeItFit() {
+    const fields = updateFitAvailability();
+    if (!fields.length) return;
+    if (!isConfigured()) {
+      $('ai-fit-status').textContent = 'Connect an AI provider first.';
+      openSettings($('ai-fit-button'));
+      return;
+    }
+    let config;
+    try { config = configFromSettings(); } catch (error) { $('ai-fit-status').textContent = messageFor(error); openSettings($('ai-fit-button')); return; }
+    const snapshot = fitFieldSnapshot(fields);
+    const layout = $('layout').value;
+    const version = ++fitRequestVersion;
+    $('ai-fit-status').textContent = `${config.definition.label} is making the overflowing text shorter. Your flyer will not change until you use a suggestion.`;
+    try {
+      const raw = await withRequest('fit', signal => callProvider(config, fitPrompts(fields, snapshot), signal));
+      if (version !== fitRequestVersion) return;
+      if (layout !== $('layout').value || !Object.entries(snapshot).every(([field, value]) => $(field).value === value)) {
+        $('ai-fit-status').textContent = 'The flyer text or layout changed while AI was working. Nothing changed; tap Make it fit again.';
+        return;
+      }
+      fitSuggestions = parseFitSuggestion(raw, fields, config);
+      fitApplyVersion++;
+      fitSnapshot = snapshot;
+      fitExpectedValues = {...snapshot};
+      fitLayout = layout;
+      renderFitSuggestions();
+      $('ai-fit-status').textContent = 'Shorter text is ready. Compare both versions, then choose Use this.';
+      $('ai-fit-suggestions').scrollIntoView({block: 'nearest'});
+    } catch (error) {
+      if (version !== fitRequestVersion) return;
+      $('ai-fit-status').textContent = messageFor(error, config);
+    }
   }
   function setField(field, value) {
     $(field).value = String(value).slice(0, FIELD_LIMITS[field]);
@@ -423,10 +597,20 @@ Call to action: ${safeBrief.cta}`;
   }
   function undo() {
     if (!undoValues) return;
+    fitApplyVersion++;
     const restore = undoValues; undoValues = null;
-    Object.keys(FIELD_LIMITS).forEach(field => setField(field, restore[field]));
+    Object.keys(restore).forEach(field => setFitField(field, restore[field]));
+    // Reusing the original preview after Undo is safe when its source text is
+    // back. A newer reply based on the accepted text still needs a fresh review.
+    if (fitExpectedValues && fitSnapshot) {
+      for (const field of Object.keys(fitExpectedValues)) {
+        if ($(field).value === fitSnapshot[field]) fitExpectedValues[field] = $(field).value;
+      }
+    }
     $('ai-undo').hidden = true;
-    $('ai-write-status').textContent = 'Undone. Your exact previous text is back.';
+    const status = 'Undone. Your exact previous text is back.';
+    $('ai-write-status').textContent = status;
+    if ($('ai-fit-status')) $('ai-fit-status').textContent = status;
   }
 
   async function writeForMe() {
@@ -682,20 +866,25 @@ Call to action: ${safeBrief.cta}`;
   $('ai-forget-confirm-yes').addEventListener('click', forgetKey);
   $('ai-write-button').addEventListener('click', writeForMe);
   $('ai-cancel-button').addEventListener('click', () => cancelRequest('write'));
+  $('ai-fit-button').addEventListener('click', makeItFit);
+  $('ai-fit-cancel-button').addEventListener('click', () => cancelRequest('fit'));
+  $('ai-fit-apply-all').addEventListener('click', () => applyFitSuggestion(Object.keys(fitSuggestions || {})));
   $('ai-post-button').addEventListener('click', writePost);
   $('ai-post-cancel-button').addEventListener('click', () => cancelRequest('post'));
   document.querySelectorAll('[data-ai-copy]').forEach(button => button.addEventListener('click', () => copyPostField(button.dataset.aiCopy)));
   for (const id of ['ai-instagram-caption', 'ai-hashtags', 'ai-facebook-description']) $(id).addEventListener('input', updatePostCounts);
   for (const eventName of ['input', 'change', 'factory:briefapplied']) $('brief').addEventListener(eventName, updatePostReadiness);
   $('ai-undo').addEventListener('click', undo);
-  for (const field of Object.keys(FIELD_LIMITS)) $(field).addEventListener('input', () => {
-    undoValues = null;
-    $('ai-undo').hidden = true;
+  for (const field of FIT_FIELDS) $(field).addEventListener('input', () => {
+    clearUndo();
   });
+  $('brief').addEventListener('factory:briefapplied', clearUndo);
+  document.addEventListener('factory:fitupdated', updateFitAvailability);
   updatePostReadiness();
   $('ai-instagram-caption').maxLength = POST_LIMITS.instagramCaption;
   $('ai-facebook-description').maxLength = POST_LIMITS.facebookDescription;
   updatePostCounts();
 
-  window.factoryAI = Object.freeze({PROVIDERS, BRAND_VOICE, POST_LIMITS, openSettings, parseSuggestion, parsePost});
+  updateFitAvailability();
+  window.factoryAI = Object.freeze({PROVIDERS, BRAND_VOICE, POST_LIMITS, FIT_FALLBACK_BUDGETS, openSettings, parseSuggestion, parseFitSuggestion, parsePost});
 })();
