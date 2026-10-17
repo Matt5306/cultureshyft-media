@@ -623,6 +623,8 @@ def main(argv: list[str] | None = None) -> int:
                 check_orders(chrome, output_dir)
                 from check_factory_ai import check_ai
                 check_ai(chrome, output_dir)
+                from check_factory_spanish import check_spanish
+                check_spanish(chrome, output_dir)
                 _render_pdf(chrome, profile, output_dir, "invoice")
                 print("PASS invoice: 1-page Letter PDF")
 

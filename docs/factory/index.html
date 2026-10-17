@@ -61,6 +61,8 @@
         <p class="field-help ai-write-status" id="ai-fit-status" role="status" aria-live="polite"></p>
         <div class="ai-write-row"><label for="headline">Headline <span>required</span></label><button type="button" class="quiet-button" id="ai-write-button">Write it for me</button><button type="button" class="quiet-button" id="ai-cancel-button" hidden>Cancel</button></div>
         <p class="field-help ai-write-status" id="ai-write-status" role="status" aria-live="polite"></p>
+        <div class="ai-spanish-actions"><button type="button" class="quiet-button" id="ai-spanish-button">Spanish version</button><button type="button" class="quiet-button" id="ai-spanish-cancel-button" hidden>Cancel</button></div>
+        <p class="field-help ai-write-status" id="ai-spanish-status" role="status" aria-live="polite"></p>
         <input id="headline" name="headline" maxlength="140" required placeholder="What's happening?" aria-describedby="ai-fit-notice-headline">
         <p class="field-help ai-fit-notice" id="ai-fit-notice-headline" hidden>Your headline is too long for this layout.</p>
         <label for="subheadline">Subheadline</label>
@@ -108,6 +110,7 @@
       </form>
       <div class="brief-actions"><button type="button" id="save-brief">Save to My flyers</button><button type="button" class="quiet-button" id="export-brief">Export brief</button><label class="quiet-button import-label" for="import-brief">Import brief</label><input type="file" id="import-brief" accept="application/json,.json" hidden></div>
       <p class="session-note" id="save-status" role="status">Your current brief autosaves on this device.</p>
+      <p class="translation-review-note" id="brief-translation-note" hidden></p>
     </section>
     <section class="preview-panel" aria-labelledby="preview-title">
       <div class="preview-heading"><div><p class="eyebrow">02 / CHECK YOUR FLYER</p><h2 id="preview-title">Ready for the real world.</h2></div><span class="paper-size">8.5 × 11 IN</span></div>
@@ -162,6 +165,14 @@
       </div>
     </section>
     <div class="ai-suggestion-actions ai-undo-row"><button type="button" class="quiet-button" id="ai-undo" hidden>Undo</button></div>
+    <section class="ai-suggestions" id="ai-spanish-preview" aria-labelledby="ai-spanish-title" hidden>
+      <div class="ai-suggestions-head"><div><p class="eyebrow">SPANISH VERSION</p><h2 id="ai-spanish-title">English | Spanish</h2></div></div>
+      <p class="translation-review-note" id="ai-spanish-review-note">Review before printing. Have someone who speaks Spanish check this translation.</p>
+      <p class="field-help">Compare every field. You can edit the Spanish text here. Dates, place and contact are copied exactly. Saving creates a separate draft and keeps your English flyer open.</p>
+      <div id="ai-spanish-fields"></div>
+      <div class="ai-suggestion-actions"><button type="button" id="ai-spanish-save">Save as Spanish draft</button></div>
+      <p id="ai-spanish-save-status" role="status" aria-live="polite"></p>
+    </section>
     <section class="ai-suggestions" id="ai-fit-suggestions" aria-labelledby="ai-fit-title" hidden>
       <div class="ai-suggestions-head"><div><p class="eyebrow">MAKE IT FIT</p><h2 id="ai-fit-title">Keep the meaning. Check the details.</h2></div><div class="ai-suggestion-actions"><button type="button" class="quiet-button" id="ai-fit-apply-all" aria-label="Use all shorter fields">Use this</button></div></div>
       <p class="field-help">Compare Your text and Shorter. Check names, dates, times, addresses and prices. Use this at the top applies all shown fields; Use this below a field applies only that field.</p>

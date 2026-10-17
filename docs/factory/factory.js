@@ -80,7 +80,7 @@
     if (!layouts.includes($('layout').value)) $('layout').value = 'poster';
     window.factoryPhoto.setState(payload.photo || {});
     render();
-    form.dispatchEvent(new CustomEvent('factory:briefapplied', {bubbles: true}));
+    form.dispatchEvent(new CustomEvent('factory:briefapplied', {bubbles: true, detail: {translation: payload.translation || null}}));
   }
 
   function fits(element) {
