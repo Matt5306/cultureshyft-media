@@ -9,6 +9,7 @@
   <link rel="icon" href="../logo/icons/favicon.ico">
   <link rel="stylesheet" href="factory.css">
   <link rel="stylesheet" href="invoice.css">
+  <link rel="stylesheet" href="ai.css">
   <script>
     window.factoryRuntimeErrors = [];
     window.factoryRecordRuntimeError = function (error) {
@@ -32,6 +33,7 @@
   <script src="share.js" defer></script>
   <script src="factory.js" defer></script>
   <script src="briefs.js" defer></script>
+  <script src="ai.js" defer></script>
   <script src="social.js" defer></script>
   <script src="invoice.js" defer></script>
 </head>
@@ -42,7 +44,7 @@
   </header>
   <main class="workspace">
     <section class="editor" aria-labelledby="page-title">
-      <div class="editor-tools"><p class="eyebrow">01 / MAKE IT YOURS</p><button type="button" class="quiet-button" id="open-briefs" aria-controls="briefs-drawer" aria-expanded="false">My flyers</button></div>
+      <div class="editor-tools"><p class="eyebrow">01 / MAKE IT YOURS</p><div class="editor-tool-actions"><button type="button" class="quiet-button" id="open-ai-settings" aria-haspopup="dialog">AI helper</button><button type="button" class="quiet-button" id="open-briefs" aria-controls="briefs-drawer" aria-expanded="false">My flyers</button></div></div>
       <h1 id="page-title">A brief in.<br>A flyer out.</h1>
       <p class="intro">Add the details. Watch your flyer take shape.</p>
       <label for="preset">Start with a sample</label>
@@ -55,7 +57,8 @@
           <option value="event">Event — date &amp; details</option>
           <option value="announcement">Announcement — just the message</option>
         </select>
-        <label for="headline">Headline <span>required</span></label>
+        <div class="ai-write-row"><label for="headline">Headline <span>required</span></label><button type="button" class="quiet-button" id="ai-write-button">Write it for me</button><button type="button" class="quiet-button" id="ai-cancel-button" hidden>Cancel</button></div>
+        <p class="field-help ai-write-status" id="ai-write-status" role="status" aria-live="polite"></p>
         <input id="headline" name="headline" maxlength="140" required placeholder="What's happening?">
         <label for="subheadline">Subheadline</label>
         <input id="subheadline" name="subheadline" maxlength="180" placeholder="One sentence that makes it matter">
@@ -68,6 +71,12 @@
         <p class="field-help" id="body-help">Keep it short. Extra text is shortened in the preview; your full text stays here.</p>
         <label for="cta">Call to action</label>
         <input id="cta" name="cta" maxlength="100" placeholder="Reserve your spot today">
+        <section class="ai-suggestions" id="ai-suggestions" aria-labelledby="ai-suggestions-title" hidden>
+          <div class="ai-suggestions-head"><div><p class="eyebrow">AI SUGGESTION</p><h2 id="ai-suggestions-title">Check every word.</h2></div><div class="ai-suggestion-actions"><button type="button" id="ai-use-all">Use this</button><button type="button" class="quiet-button" id="ai-undo" hidden>Undo</button></div></div>
+          <p class="field-help">Nothing changes until you choose Use this. Check names, dates, places, and claims yourself.</p>
+          <div class="ai-comparison-head" aria-hidden="true"><span>Your text</span><span>Suggested</span><span></span></div>
+          <div class="ai-comparison-list" id="ai-comparison-list"></div>
+        </section>
         <label for="contact">Contact line <span>required</span></label>
         <input id="contact" name="contact" maxlength="160" required placeholder="Website, email or phone number">
         <label for="qr-url">QR code link <span>optional</span></label>
@@ -134,6 +143,35 @@
     <div id="brief-list" class="brief-list"></div>
   </aside>
   <div class="drawer-scrim" id="drawer-scrim" hidden></div>
+  <dialog class="ai-dialog" id="ai-settings-dialog" aria-labelledby="ai-settings-title" aria-describedby="ai-privacy">
+    <div class="ai-dialog-head"><div><p class="eyebrow">WRITE WITH YOUR AI</p><h2 id="ai-settings-title">AI helper</h2></div><button type="button" class="icon-button" id="ai-close-settings" aria-label="Close AI helper settings">×</button></div>
+    <form id="ai-settings-form" autocomplete="off">
+      <label for="ai-provider">Provider</label>
+      <select id="ai-provider">
+        <option value="gemini">Gemini</option>
+        <option value="openai">OpenAI</option>
+        <option value="claude">Claude</option>
+        <option value="openrouter">OpenRouter</option>
+        <option value="local">Local AI (LM Studio / Ollama)</option>
+      </select>
+      <label for="ai-model">Model</label>
+      <input id="ai-model" maxlength="200" spellcheck="false" autocapitalize="none">
+      <div id="ai-base-url-group" hidden>
+        <label for="ai-base-url">Base URL</label>
+        <input id="ai-base-url" type="url" inputmode="url" maxlength="300" spellcheck="false" autocapitalize="none">
+        <p class="field-help">LM Studio defaults to http://localhost:1234/v1. For Ollama, use http://localhost:11434/v1.</p>
+      </div>
+      <div id="ai-key-group">
+        <label for="ai-api-key">API key</label>
+        <div class="ai-key-row"><input id="ai-api-key" type="password" maxlength="500" spellcheck="false" autocapitalize="none"><button type="button" class="quiet-button" id="ai-show-key" aria-pressed="false">Show</button></div>
+      </div>
+      <p class="ai-privacy" id="ai-privacy">Your key stays in this browser and is only sent to the company you chose. Free Gemini keys may let Google use what you send to improve its products, so do not put private customer details into a flyer you ask AI about.</p>
+      <p class="ai-storage-warning" id="ai-storage-warning" role="status" hidden></p>
+      <p class="ai-settings-status" id="ai-settings-status" role="status" aria-live="polite"></p>
+      <div class="ai-forget-confirm" id="ai-forget-confirm" role="group" aria-label="Confirm forgetting this key" hidden><p>Forget this key from every provider slot in this browser’s AI settings?</p><button type="button" class="quiet-button" id="ai-forget-confirm-no">Keep it</button><button type="button" class="danger-button" id="ai-forget-confirm-yes">Forget my key</button></div>
+      <div class="ai-dialog-actions"><button type="button" class="quiet-button danger-button" id="ai-forget-key">Forget my key</button><span class="ai-action-spacer"></span><button type="button" class="quiet-button" id="ai-test-connection">Test connection</button><button type="button" class="quiet-button" id="ai-test-cancel-button" hidden>Cancel</button><button type="submit" id="ai-save-settings">Save</button></div>
+    </form>
+  </dialog>
   <nav class="mobile-actions" aria-label="Flyer downloads"><button type="button" id="mobile-print">Save as PDF</button><button type="button" id="mobile-download">Download PNG</button></nav>
   <noscript>This flyer needs JavaScript. Enable it in your browser, then reload this page. Your files are not changed.</noscript>
 </body>

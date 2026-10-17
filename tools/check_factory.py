@@ -621,6 +621,8 @@ def main(argv: list[str] | None = None) -> int:
                 check_browser(chrome, output_dir)
                 from check_factory_orders import check_orders
                 check_orders(chrome, output_dir)
+                from check_factory_ai import check_ai
+                check_ai(chrome, output_dir)
                 _render_pdf(chrome, profile, output_dir, "invoice")
                 print("PASS invoice: 1-page Letter PDF")
 
@@ -645,9 +647,41 @@ class _ExistingDirectory:
         return None
 
 
+class _PassCounter:
+    """Count "PASS ..." lines so the run ends with a pytest-style summary the
+    AI Council's receipt parser can read (it ignores bespoke PASS output)."""
+
+    def __init__(self, stream) -> None:
+        self.stream = stream
+        self.passed = 0
+        self._pending = ""
+
+    def write(self, text: str) -> int:
+        self._pending += text
+        *lines, self._pending = self._pending.split(chr(10))
+        self.passed += sum(1 for line in lines if line.startswith("PASS "))
+        return self.stream.write(text)
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+    def __getattr__(self, name: str):
+        return getattr(self.stream, name)
+
+
 if __name__ == "__main__":
+    import time as _time
+    _started = _time.monotonic()
+    _counter = _PassCounter(sys.stdout)
+    sys.stdout = _counter
     try:
-        raise SystemExit(main())
+        _code = main()
     except CheckFailure as exc:
+        sys.stdout = _counter.stream
         print(f"FAIL Flyer Factory: {exc}", file=sys.stderr)
+        print(f"===== 1 failed, {_counter.passed} passed in {_time.monotonic() - _started:.1f}s =====")
         raise SystemExit(1)
+    sys.stdout = _counter.stream
+    if _code == 0:
+        print(f"===== {_counter.passed} passed in {_time.monotonic() - _started:.1f}s =====")
+    raise SystemExit(_code)
